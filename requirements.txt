@@ -1,7 +1,7 @@
 Flask
 Flask-SQLAlchemy
 APScheduler
-gunicorn
 pytz
+gunicorn
 psycopg2-binary
 resend
