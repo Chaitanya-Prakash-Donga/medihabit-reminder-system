@@ -235,12 +235,17 @@ def delete_medication(id):
         flash("Medication removed.", "success")
     return redirect(url_for('dashboard'))
 
-# ── Profile Edit Logic ────────────────────────────────────────────────────────
+# ── Updated Profile Edit Logic ────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
-    user = User.query.get(session['user_id'])
+    # Fix: Fetching fresh user from DB to ensure session is active
+    user = User.query.filter_by(id=session['user_id']).first()
     
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for('login'))
+
     if request.method == 'POST':
         try:
             # 1. Update Name
