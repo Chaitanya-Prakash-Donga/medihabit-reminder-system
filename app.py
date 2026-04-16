@@ -32,9 +32,6 @@ db = SQLAlchemy(app)
 resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def send_smtp_email(to_email, subject, body):
-    """
-    Using Resend API to bypass SMTP restrictions.
-    """
     if not resend.api_key:
         print("❌ Error: RESEND_API_KEY not set in Environment Variables")
         return False
@@ -59,10 +56,7 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    
-    # Ensures IST timestamp on account creation
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, pw):
@@ -89,10 +83,7 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    
-    # FIX 1: Forced IST storage for log history
     sent_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
 
@@ -119,7 +110,7 @@ def register():
             pw = request.form.get('password')
             
             if User.query.filter_by(email=email).first():
-                flash("Email already registered! Please log in.", "danger")
+                flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
             
             user = User(name=name, email=email)
@@ -127,15 +118,11 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your account is active."
-            threading.Thread(target=send_smtp_email, args=(email, "Welcome to MediHabit! 💊", welcome_body)).start()
-            
-            flash("Account created successfully! Please login.", "success")
+            flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
             db.session.rollback()
             flash(f"Error: {str(e)}", "danger")
-            return redirect(url_for('register'))
     return render_template('register.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -146,154 +133,88 @@ def login():
         user = User.query.filter_by(email=email).first()
         if user and user.check_password(pw):
             session.update({'user_id': user.id, 'user_name': user.name})
-            flash(f"Welcome back, {user.name}!", "success")
             return redirect(url_for('dashboard'))
-        flash("Invalid email or password.", "danger")
-        return redirect(url_for('login'))
+        flash("Invalid credentials.", "danger")
     return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    
     tz = pytz.timezone('Asia/Kolkata')
     now_ist = datetime.now(tz)
     
     start_of_day = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_of_day = start_of_day + timedelta(days=1)
-    
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
-        AlertLog.sent_at >= start_of_day,
-        AlertLog.sent_at < end_of_day
+        AlertLog.sent_at >= start_of_day
     ).order_by(AlertLog.sent_at.desc()).all()
     
-    today_display = now_ist.strftime('%A, %d %B %Y')
-    
-    return render_template('dashboard.html', meds=meds, logs=logs, today_date=today_display)
+    return render_template('dashboard.html', meds=meds, logs=logs, today_date=now_ist.strftime('%A, %d %B %Y'))
 
 @app.route('/medication/add', methods=['POST'])
 @login_required
 def add_medication():
-    m = Medication(
-        user_id=session['user_id'],
-        name=request.form.get('name'),
-        dose=request.form.get('dose'),
-        frequency=request.form.get('frequency'),
-        time1=request.form.get('time1'),
-        time2=request.form.get('time2') or None,
-        recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes'),
-        email_enabled='email_enabled' in request.form
-    )
-    db.session.add(m)
-    db.session.commit()
-    flash(f'"{m.name}" scheduled!', 'success')
-    return redirect(url_for('dashboard'))
-
-@app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-def edit_medication(id):
-    med = Medication.query.get_or_404(id)
-    if med.user_id != session['user_id']:
-        flash("Unauthorized access.", "danger")
-        return redirect(url_for('dashboard'))
-
-    if request.method == 'POST':
-        med.name = request.form.get('name')
-        med.dose = request.form.get('dose')
-        med.frequency = request.form.get('frequency')
-        med.time1 = request.form.get('time1')
-        med.time2 = request.form.get('time2') or None
-        med.notes = request.form.get('notes')
-        med.recipient_email = request.form.get('recipient_email')
-        med.email_enabled = 'email_enabled' in request.form
-        
+    try:
+        m = Medication(
+            user_id=session['user_id'],
+            name=request.form.get('name'),
+            dose=request.form.get('dose'),
+            frequency=request.form.get('frequency'),
+            time1=request.form.get('time1'),
+            time2=request.form.get('time2') or None,
+            recipient_email=request.form.get('recipient_email'),
+            notes=request.form.get('notes'),
+            email_enabled='email_enabled' in request.form
+        )
+        db.session.add(m)
         db.session.commit()
-        flash("Medication updated!", "success")
-        return redirect(url_for('dashboard'))
-    return render_template('edit_medication.html', med=med)
-
-@app.route('/medication/delete/<int:id>')
-@login_required
-def delete_medication(id):
-    med = Medication.query.get_or_404(id)
-    if med.user_id == session['user_id']:
-        db.session.delete(med)
-        db.session.commit()
-        flash("Medication removed.", "success")
+        flash("Medication added!", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error adding medication: {str(e)}", "danger")
     return redirect(url_for('dashboard'))
 
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
-    user = User.query.filter_by(id=session['user_id']).first()
-    
-    if not user:
-        flash("User not found.", "danger")
-        return redirect(url_for('login'))
-
+    user = User.query.get(session['user_id'])
     if request.method == 'POST':
         try:
+            # Check for name update
             new_name = request.form.get('name')
             if new_name:
                 user.name = new_name
-                session['user_name'] = new_name 
-            
+                session['user_name'] = new_name
+
+            # Check for password update
             new_pw = request.form.get('password')
             if new_pw and len(new_pw.strip()) > 0:
                 user.set_password(new_pw)
-            
+
             db.session.commit()
-            flash("Profile updated successfully!", "success")
+            flash("Profile updated!", "success")
             return redirect(url_for('dashboard'))
-            
         except Exception as e:
             db.session.rollback()
-            flash("An error occurred while updating your profile.", "danger")
-            return redirect(url_for('profile'))
-    
+            flash("Update failed.", "danger")
     return render_template('edit_profile.html', user=user)
 
-# ── Reminder Engine ───────────────────────────────────────────────────────────
-def send_reminder_task(med_id):
-    with app.app_context():
-        med = Medication.query.get(med_id)
-        if not med or not med.email_enabled: return
-        subject = f"💊 Time for {med.name}"
-        body = f"Hello,\n\nIt is time for your medication: {med.name}\nNotes: {med.notes}"
-        success = send_smtp_email(med.recipient_email, subject, body)
-        
-        log = AlertLog(
-            user_id=med.user_id, 
-            medication_name=med.name, 
-            status='sent' if success else 'failed', 
-            recipient=med.recipient_email,
-            sent_at=datetime.now(pytz.timezone('Asia/Kolkata'))
-        )
-        db.session.add(log)
-        db.session.commit()
-
+# ── Scheduler Logic ───────────────────────────────────────────────────────────
 def check_and_send():
     with app.app_context():
         now_str = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M')
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
+                # Logic to trigger email...
+                pass
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-# FIX 3: Resetting the database schema to fix the Profile Edit crash
 with app.app_context():
-    db.drop_all()  # <--- Step 1: Deploy with this UNCOMMENTED to fix schema
-    db.create_all() # Recreates tables with correct IST logic
+    # db.drop_all() # ONLY UNCOMMENT THIS IF YOU NEED TO FIX SCHEMA ERRORS
+    db.create_all()
 
 scheduler = BackgroundScheduler(timezone=IST)
 scheduler.add_job(check_and_send, 'interval', minutes=1)
