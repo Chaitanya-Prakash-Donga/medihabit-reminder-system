@@ -2,7 +2,7 @@ import os
 import threading
 import resend  # Use Resend instead of smtplib for Render compatibility
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import wraps
 
 from flask import (Flask, render_template, request,
@@ -13,11 +13,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-# Secret key for session signing
 app.secret_key = os.environ.get('SECRET_KEY', 'medihabit-super-secret-key-123')
 IST = pytz.timezone('Asia/Kolkata')
 
-# Database configuration (PostgreSQL for Render, SQLite for local)
 uri = os.environ.get('DATABASE_URL')
 if uri and uri.startswith("postgres://"):
     uri = uri.replace("postgres://", "postgresql://", 1)
@@ -28,12 +26,13 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend API Email Logic ────────────────────────────────────────────────────
+# ── Resend API Email Logic (Updated) ──────────────────────────────────────────
 resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def send_smtp_email(to_email, subject, body):
     """
-    Using Resend API to bypass SMTP restrictions.
+    Using Resend API to bypass Render's SMTP port restrictions.
+    Note: 'from' must be 'onboarding@resend.dev' for free accounts.
     """
     if not resend.api_key:
         print("❌ Error: RESEND_API_KEY not set in Environment Variables")
@@ -59,10 +58,7 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    
-    # Updated to explicitly fetch IST on every creation
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, pw):
@@ -89,10 +85,7 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    
-    # Updated to explicitly fetch IST on every log entry
-    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    
+    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
 
@@ -157,29 +150,19 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# ── Updated Dashboard Route ───────────────────────────────────────────────────
 @app.route('/dashboard')
 @login_required
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
     
-    # 1. Force IST timezone for the "Today" calculation
-    tz = pytz.timezone('Asia/Kolkata')
-    now_ist = datetime.now(tz)
-    
-    # Create a 24-hour window for 'Today' in IST
-    start_of_day = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_of_day = start_of_day + timedelta(days=1)
-    
-    # 2. Query logs within this specific IST window to bypass UTC server confusion
+    today_ist = datetime.now(IST).date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
-        AlertLog.sent_at >= start_of_day,
-        AlertLog.sent_at < end_of_day
+        db.func.date(AlertLog.sent_at) == today_ist
     ).order_by(AlertLog.sent_at.desc()).all()
     
-    today_display = now_ist.strftime('%A, %d %B %Y')
+    today_display = datetime.now(IST).strftime('%A, %d %B %Y')
     
     return render_template('dashboard.html', meds=meds, logs=logs, today_date=today_display)
 
@@ -235,26 +218,18 @@ def delete_medication(id):
         flash("Medication removed.", "success")
     return redirect(url_for('dashboard'))
 
-# ── Updated Profile Edit Logic ────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
-    # Fix: Fetching fresh user from DB to ensure session is active
-    user = User.query.filter_by(id=session['user_id']).first()
+    user = User.query.get(session['user_id'])
     
-    if not user:
-        flash("User not found.", "danger")
-        return redirect(url_for('login'))
-
     if request.method == 'POST':
         try:
-            # 1. Update Name
             new_name = request.form.get('name')
             if new_name:
                 user.name = new_name
-                session['user_name'] = new_name 
+                session['user_name'] = new_name
             
-            # 2. Update Password (only if user provided a new one)
             new_pw = request.form.get('password')
             if new_pw and len(new_pw.strip()) > 0:
                 user.set_password(new_pw)
@@ -279,20 +254,19 @@ def send_reminder_task(med_id):
         body = f"Hello,\n\nIt is time for your medication: {med.name}\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
         
+        # Log the result
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
             status='sent' if success else 'failed', 
-            recipient=med.recipient_email,
-            sent_at=datetime.now(pytz.timezone('Asia/Kolkata')) # Explicit IST log
+            recipient=med.recipient_email
         )
         db.session.add(log)
         db.session.commit()
 
 def check_and_send():
     with app.app_context():
-        # Force the scheduler to check against current IST time
-        now_str = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M')
+        now_str = datetime.now(IST).strftime('%H:%M')
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
