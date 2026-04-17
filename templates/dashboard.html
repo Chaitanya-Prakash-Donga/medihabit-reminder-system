@@ -59,7 +59,8 @@
   <div style="display:flex;align-items:center;gap:10px">
     <div class="avatar">{{ session['user_name'][0]|upper if session['user_name'] else 'U' }}</div>
     <span style="font-size:13px;color:var(--muted)">{{ session['user_name'] }}</span>
-    <a href="{{ url_for('logout') }}" class="btn btn-sm">Log out</a>
+    <a href="{{ url_for('profile') }}" class="btn btn-sm">Profile</a>
+    <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">Log out</a>
   </div>
 </nav>
 
@@ -104,9 +105,6 @@
       </div>
       <div class="field"><label>Recipient email *</label><input type="email" name="recipient_email" required placeholder="patient@email.com"/></div>
       <div class="field"><label>Notes</label><input type="text" name="notes" placeholder="e.g. Take after meals"/></div>
-      <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:13px">
-          <input type="checkbox" name="email_enabled" checked> Send email reminder
-      </label>
       <div style="display:flex;gap:8px">
         <button type="submit" class="btn btn-primary btn-sm">Save & schedule</button>
         <button type="button" class="btn btn-sm" onclick="toggleForm()">Cancel</button>
@@ -128,7 +126,6 @@
             <div class="chips">
               <span class="chip">{{ m.time1 }}</span>
               {% if m.time2 %}<span class="chip">{{ m.time2 }}</span>{% endif %}
-              {% if m.email_enabled %}<span class="badge b-blue">Email</span>{% endif %}
             </div>
           </div>
           <div class="med-acts">
@@ -157,6 +154,15 @@
         {% endfor %}
     {% endif %}
   </div>
+
+  <div class="section-label">Account settings</div>
+  <div class="card" style="display:flex; justify-content: space-between; align-items: center;">
+      <div>
+          <div style="font-weight: 500;">User Profile</div>
+          <div style="font-size:12px; color: var(--muted);">Update your name and password</div>
+      </div>
+      <a href="{{ url_for('profile') }}" class="btn btn-sm">Manage Profile</a>
+  </div>
 </div>
 
 <script>
@@ -164,12 +170,19 @@ function toggleForm(){
   document.getElementById('add-form').classList.toggle('open');
 }
 
-function toast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3000);
-}
+// Voice Alert Logic: Checks every minute if it matches a medicine time
+const meds = {{ meds_js | tojson }};
+setInterval(() => {
+    const now = new Date();
+    const currentTime = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
+    
+    meds.forEach(m => {
+        if (m.t1 === currentTime || m.t2 === currentTime) {
+            const speech = new SpeechSynthesisUtterance(`Reminder: Time to take your medicine, ${m.name}`);
+            window.speechSynthesis.speak(speech);
+        }
+    });
+}, 60000);
 </script>
 </body>
 </html>
