@@ -47,9 +47,6 @@
     .alert { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-size: 13px; text-align: center; }
     .alert-success { background: var(--success-bg); color: var(--success); }
     .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--accent-fg);padding:10px 20px;border-radius:var(--radius);font-size:13px;display:none;z-index:999}
-    
-    /* Hover effect for name link */
-    .user-name-link:hover { opacity: 0.7; }
 </style>
 </head>
 <body>
@@ -62,11 +59,10 @@
   <div style="display:flex;align-items:center;gap:10px">
     <div class="avatar">{{ session['user_name'][0]|upper if session['user_name'] else 'U' }}</div>
     
-    <a href="{{ url_for('profile') }}" class="user-name-link" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500;">
+    <a href="{{ url_for('profile') }}" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500; transition: color 0.2s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">
         {{ session['user_name'] }}
     </a>
 
-    <a href="{{ url_for('profile') }}" class="btn btn-sm">Profile</a>
     <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">Log out</a>
   </div>
 </nav>
