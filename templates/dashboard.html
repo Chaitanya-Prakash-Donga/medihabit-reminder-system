@@ -46,7 +46,6 @@
     .empty{text-align:center;padding:2rem;color:var(--muted);font-size:13px}
     .alert { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-size: 13px; text-align: center; }
     .alert-success { background: var(--success-bg); color: var(--success); }
-    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--accent-fg);padding:10px 20px;border-radius:var(--radius);font-size:13px;display:none;z-index:999}
 </style>
 </head>
 <body>
@@ -58,18 +57,14 @@
   </a>
   <div style="display:flex;align-items:center;gap:10px">
     <div class="avatar">{{ session['user_name'][0]|upper if session['user_name'] else 'U' }}</div>
-    
-    <a href="{{ url_for('profile') }}" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500; transition: color 0.2s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">
+    <a href="{{ url_for('profile') }}" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500;">
         {{ session['user_name'] }}
     </a>
-
     <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">Log out</a>
   </div>
 </nav>
 
 <div class="page">
-  <div id="toast" class="toast"></div>
-
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -81,7 +76,7 @@
   <div class="page-header">
     <div>
       <h1 style="font-size:20px;font-weight:500">Dashboard</h1>
-      <p style="font-size:12px;color:var(--muted)">{{ today_date }}</p>
+      <p style="font-size:12px;color:var(--muted)">{{ today_date }} (IST)</p>
     </div>
     <button class="btn btn-primary btn-sm" onclick="toggleForm()">+ Add medication</button>
   </div>
@@ -150,21 +145,12 @@
           <div style="font-size:18px">✉️</div>
           <div class="med-body">
             <div class="med-name">{{ log.medication_name }}</div>
-            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }}</div>
+            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }} IST</div>
           </div>
           <div class="badge b-blue">Sent</div>
         </div>
         {% endfor %}
     {% endif %}
-  </div>
-
-  <div class="section-label">Account settings</div>
-  <div class="card" style="display:flex; justify-content: space-between; align-items: center;">
-      <div>
-          <div style="font-weight: 500;">User Profile</div>
-          <div style="font-size:12px; color: var(--muted);">Update your name and password</div>
-      </div>
-      <a href="{{ url_for('profile') }}" class="btn btn-sm">Manage Profile</a>
   </div>
 </div>
 
@@ -173,19 +159,31 @@ function toggleForm(){
   document.getElementById('add-form').classList.toggle('open');
 }
 
-// Voice Alert Logic: Checks every minute if it matches a medicine time
+// VOICE ALERT LOGIC
+// This script checks the time every 30 seconds.
 const meds = {{ meds_js | tojson }};
+const spokenTimes = new Set(); // Prevents repeating the alert in the same minute
+
 setInterval(() => {
     const now = new Date();
-    const currentTime = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
-    
+    // Force browser to check time in IST for comparison
+    const ISTTime = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false, hour: '2-digit', minute: '2-digit' });
+
     meds.forEach(m => {
-        if (m.t1 === currentTime || m.t2 === currentTime) {
-            const speech = new SpeechSynthesisUtterance(`Reminder: Time to take your medicine, ${m.name}`);
+        // Check both time slots
+        if ((m.t1 === ISTTime || (m.t2 && m.t2 === ISTTime)) && !spokenTimes.has(m.name + ISTTime)) {
+            const message = `Reminder: Hi ${document.querySelector('a[href*="profile"]').innerText.trim()}, it is time to take your medicine: ${m.name}.`;
+            const speech = new SpeechSynthesisUtterance(message);
+            speech.rate = 0.9; // Slightly slower for clarity
             window.speechSynthesis.speak(speech);
+            
+            spokenTimes.add(m.name + ISTTime); // Mark as spoken
         }
     });
-}, 60000);
+    
+    // Clear old data every hour to keep memory clean
+    if (now.getMinutes() === 0) spokenTimes.clear();
+}, 30000);
 </script>
 </body>
 </html>
