@@ -26,18 +26,13 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend API Email Logic (Updated) ──────────────────────────────────────────
+# ── Resend API Email Logic ──────────────────────────────────────────────────
 resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def send_smtp_email(to_email, subject, body):
-    """
-    Using Resend API to bypass Render's SMTP port restrictions.
-    Note: 'from' must be 'onboarding@resend.dev' for free accounts.
-    """
     if not resend.api_key:
-        print("❌ Error: RESEND_API_KEY not set in Environment Variables")
+        print("❌ Error: RESEND_API_KEY not set")
         return False
-
     try:
         params = {
             "from": "MediHabit <onboarding@resend.dev>",
@@ -46,7 +41,6 @@ def send_smtp_email(to_email, subject, body):
             "text": body,
         }
         resend.Emails.send(params)
-        print(f"✅ Email sent successfully to {to_email}")
         return True
     except Exception as e:
         print(f"❌ Resend API Error: {str(e)}") 
@@ -112,7 +106,7 @@ def register():
             pw = request.form.get('password')
             
             if User.query.filter_by(email=email).first():
-                flash("Email already registered! Please log in.", "danger")
+                flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
             
             user = User(name=name, email=email)
@@ -120,15 +114,14 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your account is active."
-            threading.Thread(target=send_smtp_email, args=(email, "Welcome to MediHabit! 💊", welcome_body)).start()
+            welcome_body = f"Hi {name},\n\nWelcome to MediHabit!"
+            threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
             
-            flash("Account created successfully! Please login.", "success")
+            flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
             db.session.rollback()
             flash(f"Error: {str(e)}", "danger")
-            return redirect(url_for('register'))
     return render_template('register.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -142,7 +135,6 @@ def login():
             flash(f"Welcome back, {user.name}!", "success")
             return redirect(url_for('dashboard'))
         flash("Invalid email or password.", "danger")
-        return redirect(url_for('login'))
     return render_template('login.html')
 
 @app.route('/logout')
@@ -156,6 +148,9 @@ def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
     
+    # Logic to prepare medicine list for the Voice Alert JS
+    meds_js = [{"name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
+
     today_ist = datetime.now(IST).date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
@@ -163,8 +158,7 @@ def dashboard():
     ).order_by(AlertLog.sent_at.desc()).all()
     
     today_display = datetime.now(IST).strftime('%A, %d %B %Y')
-    
-    return render_template('dashboard.html', meds=meds, logs=logs, today_date=today_display)
+    return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, today_date=today_display)
 
 @app.route('/medication/add', methods=['POST'])
 @login_required
@@ -177,32 +171,51 @@ def add_medication():
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
         recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes'),
-        email_enabled='email_enabled' in request.form
+        notes=request.form.get('notes')
     )
     db.session.add(m)
     db.session.commit()
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    user = User.query.get(session['user_id'])
+    if request.method == 'POST':
+        try:
+            new_name = request.form.get('name')
+            if new_name:
+                user.name = new_name
+                session['user_name'] = new_name
+            
+            new_pw = request.form.get('password')
+            if new_pw and len(new_pw.strip()) > 0:
+                user.set_password(new_pw)
+            
+            db.session.commit()
+            flash("Profile updated successfully!", "success")
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash("Error updating profile.", "danger")
+            return redirect(url_for('profile'))
+    
+    return render_template('edit_profile.html', user=user)
+
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
     if med.user_id != session['user_id']:
-        flash("Unauthorized access.", "danger")
         return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
-        med.frequency = request.form.get('frequency')
         med.time1 = request.form.get('time1')
         med.time2 = request.form.get('time2') or None
-        med.notes = request.form.get('notes')
         med.recipient_email = request.form.get('recipient_email')
-        med.email_enabled = 'email_enabled' in request.form
-        
         db.session.commit()
         flash("Medication updated!", "success")
         return redirect(url_for('dashboard'))
@@ -218,56 +231,24 @@ def delete_medication(id):
         flash("Medication removed.", "success")
     return redirect(url_for('dashboard'))
 
-@app.route('/profile', methods=['GET', 'POST'])
-@login_required
-def profile():
-    user = User.query.get(session['user_id'])
-    
-    if request.method == 'POST':
-        try:
-            new_name = request.form.get('name')
-            if new_name:
-                user.name = new_name
-                session['user_name'] = new_name
-            
-            new_pw = request.form.get('password')
-            if new_pw and len(new_pw.strip()) > 0:
-                user.set_password(new_pw)
-            
-            db.session.commit()
-            flash("Profile updated successfully!", "success")
-            return redirect(url_for('dashboard'))
-            
-        except Exception as e:
-            db.session.rollback()
-            flash("An error occurred while updating your profile.", "danger")
-            return redirect(url_for('profile'))
-    
-    return render_template('edit_profile.html', user=user)
-
 # ── Reminder Engine ───────────────────────────────────────────────────────────
 def send_reminder_task(med_id):
     with app.app_context():
         med = Medication.query.get(med_id)
-        if not med or not med.email_enabled: return
+        if not med or not med.active: return
         subject = f"💊 Time for {med.name}"
-        body = f"Hello,\n\nIt is time for your medication: {med.name}\nNotes: {med.notes}"
+        body = f"Reminder: It is time to take {med.name}."
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        # Log the result
-        log = AlertLog(
-            user_id=med.user_id, 
-            medication_name=med.name, 
-            status='sent' if success else 'failed', 
-            recipient=med.recipient_email
-        )
+        log = AlertLog(user_id=med.user_id, medication_name=med.name, 
+                       status='sent' if success else 'failed', recipient=med.recipient_email)
         db.session.add(log)
         db.session.commit()
 
 def check_and_send():
     with app.app_context():
         now_str = datetime.now(IST).strftime('%H:%M')
-        meds = Medication.query.filter_by(active=True, email_enabled=True).all()
+        meds = Medication.query.filter_by(active=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
                 threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
