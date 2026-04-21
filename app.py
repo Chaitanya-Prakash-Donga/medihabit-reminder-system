@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import wraps
 
 from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash)
+                   redirect, url_for, session, flash, send_from_directory)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -97,6 +97,15 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+# ── PWA & Service Worker Routes ───────────────────────────────────────────────
+@app.route('/manifest.json')
+def serve_manifest():
+    return send_from_directory('static', 'manifest.json')
+
+@app.route('/sw.js')
+def serve_sw():
+    return send_from_directory('static', 'sw.js')
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
