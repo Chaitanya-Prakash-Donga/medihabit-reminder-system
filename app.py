@@ -1,7 +1,6 @@
 """
 MediHabit - app.py
 Full Flask backend: auth, CRUD, Gmail SMTP email alerts, APScheduler
-Updated: Fixed IST Timezone and Production Scheduler setup
 """
 import os
 import threading
@@ -19,9 +18,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'medihabit-super-secret-key-123')
-
-# 1. FIX: Define IST Timezone clearly
-IST = pytz.timezone('Asia/Kolkata')
 
 uri = os.environ.get('DATABASE_URL')
 if uri and uri.startswith("postgres://"):
@@ -86,7 +82,7 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST)) # FIX: Default now IST
+    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
 
@@ -164,9 +160,10 @@ def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
     
+    # ── Updated: Logic for the Voice Alert JS ──
     meds_js = [{"name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
 
-    # FIX: Force IST Time for dashboard logs filtering
+    # ── Updated: Force IST Time for display and filtering ──
     now_ist = datetime.now(IST)
     today_ist_date = now_ist.date()
     
@@ -196,7 +193,48 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# ... [Remaining profile and edit routes stay the same] ...
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    user = User.query.get(session['user_id'])
+    if request.method == 'POST':
+        try:
+            new_name = request.form.get('name')
+            if new_name:
+                user.name = new_name
+                session['user_name'] = new_name
+            
+            new_pw = request.form.get('password')
+            if new_pw and len(new_pw.strip()) > 0:
+                user.set_password(new_pw)
+            
+            db.session.commit()
+            flash("Profile updated successfully!", "success")
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash("Error updating profile.", "danger")
+            return redirect(url_for('profile'))
+    
+    return render_template('edit_profile.html', user=user)
+
+@app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def edit_medication(id):
+    med = Medication.query.get_or_404(id)
+    if med.user_id != session['user_id']:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        med.name = request.form.get('name')
+        med.dose = request.form.get('dose')
+        med.time1 = request.form.get('time1')
+        med.time2 = request.form.get('time2') or None
+        med.recipient_email = request.form.get('recipient_email')
+        db.session.commit()
+        flash("Medication updated!", "success")
+        return redirect(url_for('dashboard'))
+    return render_template('edit_medication.html', med=med)
 
 @app.route('/medication/delete/<int:id>')
 @login_required
@@ -214,40 +252,35 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med or not med.active: return
         subject = f"💊 Time for {med.name}"
-        body = f"Hi {med.user.name},\n\nIt is time to take your {med.name} ({med.dose}).\nNotes: {med.notes}"
+        body = f"Reminder: It is time to take {med.name}."
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        # FIX: Explicitly force IST for the sent_at timestamp in logs
+        # ── Updated: Explicitly force IST for the sent_at timestamp ──
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
             status='sent' if success else 'failed', 
             recipient=med.recipient_email,
-            sent_at=datetime.now(IST)  # Prevents UTC lag
+            sent_at=datetime.now(IST)  # This fixes the 5-hour delay in logs
         )
         db.session.add(log)
         db.session.commit()
 
 def check_and_send():
-    """Runs every minute via APScheduler"""
     with app.app_context():
         now_str = datetime.now(IST).strftime('%H:%M')
         meds = Medication.query.filter_by(active=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                # Trigger email in a background thread to not block the scheduler
                 threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
 
-# ── Startup & Scheduler Configuration ──────────────────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
 
-# 4. FIX: Initialize Scheduler with IST timezone and daemon=True
-# This is placed outside __main__ so it starts on Render production servers
-scheduler = BackgroundScheduler(daemon=True, timezone=IST)
-scheduler.add_job(func=check_and_send, trigger="interval", minutes=1)
+scheduler = BackgroundScheduler(timezone=IST)
+scheduler.add_job(check_and_send, 'interval', minutes=1)
 scheduler.start()
 
 if __name__ == '__main__':
-    # use_reloader=False prevents the scheduler from starting twice in local debug
     app.run(debug=True, use_reloader=False)
