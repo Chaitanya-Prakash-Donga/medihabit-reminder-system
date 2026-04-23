@@ -2,9 +2,6 @@
 MediHabit - app.py
 Full Flask backend: auth, CRUD, Gmail SMTP email alerts, APScheduler
 """
-"""
-MediHabit - app.py (Updated with Explicit IST Localization)
-"""
 import os
 import threading
 import resend  
@@ -22,10 +19,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'medihabit-super-secret-key-123')
 
-# Define IST Timezone
+# STEP 1: Define IST Timezone globally
 IST = pytz.timezone('Asia/Kolkata')
 
-# Helper function for explicit IST time (Step 1 fix)
+# Helper function for explicit IST time
 def get_ist_time():
     return datetime.now(IST)
 
@@ -65,8 +62,8 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    # Use the helper function for the default value
-    created_at = db.Column(db.DateTime, default=get_ist_time)
+    # Corrected: Use lambda to ensure get_ist_time() is called at record creation
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, pw):
@@ -93,8 +90,8 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    # Forced IST for logging (Step 2 fix)
-    sent_at = db.Column(db.DateTime, default=get_ist_time)
+    # Corrected: Explicitly call IST time for logs
+    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
 
@@ -121,7 +118,6 @@ def serve_sw():
 def index():
     return redirect(url_for('dashboard')) if 'user_id' in session else redirect(url_for('login'))
 
-# DEBUG ROUTE: Use this to check if Render's time is correct
 @app.route('/debug-time')
 def debug_time():
     server_now = datetime.now()
@@ -182,14 +178,12 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    
     meds_js = [{"name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
 
-    # Force IST for display logic
     now_ist = get_ist_time()
     today_ist_date = now_ist.date()
     
-    # When querying logs, we ensure we filter by the localized date
+    # Ensure logs are filtered based on the corrected IST date
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_ist_date
@@ -238,7 +232,6 @@ def profile():
             db.session.rollback()
             flash("Error updating profile.", "danger")
             return redirect(url_for('profile'))
-    
     return render_template('edit_profile.html', user=user)
 
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
@@ -278,7 +271,6 @@ def send_reminder_task(med_id):
         body = f"Reminder: It is time to take {med.name}."
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        # Explicitly force IST for the sent_at log
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
@@ -291,7 +283,7 @@ def send_reminder_task(med_id):
 
 def check_and_send():
     with app.app_context():
-        # Compare current IST time string with medication time string
+        # Get current IST time formatted as HH:MM for comparison
         now_str = get_ist_time().strftime('%H:%M')
         meds = Medication.query.filter_by(active=True).all()
         for m in meds:
@@ -302,10 +294,11 @@ def check_and_send():
 with app.app_context():
     db.create_all()
 
-# Ensure APScheduler uses IST for its internal clock
+# STEP 2: Configure APScheduler to use IST
 scheduler = BackgroundScheduler(timezone=IST)
 scheduler.add_job(check_and_send, 'interval', minutes=1)
 scheduler.start()
 
 if __name__ == '__main__':
+    # use_reloader=False is important when using APScheduler in debug mode
     app.run(debug=True, use_reloader=False)
