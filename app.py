@@ -1,7 +1,7 @@
 """
 MediHabit - app.py
-Full Flask backend: auth, CRUD, Gmail SMTP alerts, APScheduler.
-Updated to match Dashboard UI and Render environment variables.
+Full Flask backend: Auth, CRUD, Gmail SMTP alerts, APScheduler.
+Optimized for Render Deployment.
 """
 import os
 import threading
@@ -13,7 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from functools import wraps
 
 from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash, send_from_directory)
+                   redirect, url_for, session, flash)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -22,13 +22,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'medihabit-super-secret-key-123')
 
-# STEP 1: Define IST Timezone globally
+# Define IST Timezone globally
 IST = pytz.timezone('Asia/Kolkata')
 
 def get_ist_time():
     """Helper function for current IST time."""
     return datetime.now(IST)
 
+# Database Configuration (PostgreSQL for Render / SQLite for Local)
 uri = os.environ.get('DATABASE_URL')
 if uri and uri.startswith("postgres://"):
     uri = uri.replace("postgres://", "postgresql://", 1)
@@ -165,7 +166,6 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    
     now_ist = get_ist_time()
     today_ist_date = now_ist.date()
     
@@ -174,7 +174,6 @@ def dashboard():
         db.func.date(AlertLog.sent_at) == today_ist_date
     ).order_by(AlertLog.sent_at.desc()).all()
     
-    # Calculate stats for the dashboard boxes shown in your images
     alerts_configured = len(meds)
     sent_today = len([log for log in logs if log.status == 'sent'])
     
@@ -210,7 +209,6 @@ def edit_medication(id):
     med = Medication.query.get_or_404(id)
     if med.user_id != session['user_id']:
         return redirect(url_for('dashboard'))
-
     if request.method == 'POST':
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
@@ -253,15 +251,13 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med or not med.active: return
         subject = f"💊 Time for {med.name}"
-        body = f"Reminder: It is time to take {med.name} ({med.dose})."
+        body = f"Reminder: It is time to take your {med.name} ({med.dose}).\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
         
         log = AlertLog(
-            user_id=med.user_id, 
-            medication_name=med.name, 
+            user_id=med.user_id, medication_name=med.name, 
             status='sent' if success else 'failed', 
-            recipient=med.recipient_email,
-            sent_at=get_ist_time() 
+            recipient=med.recipient_email, sent_at=get_ist_time() 
         )
         db.session.add(log)
         db.session.commit()
