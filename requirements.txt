@@ -5,3 +5,4 @@ pytz
 APScheduler
 werkzeug
 gunicorn
+resend
