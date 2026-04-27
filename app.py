@@ -1,30 +1,32 @@
 """
 MediHabit - app.py
-Full Flask backend: auth, CRUD, Resend API alerts, APScheduler
-Enforced IST Timezone for accurate Dashboard filtering
+Full Flask backend using Gmail SMTP for alerts.
+Enforced IST Timezone for accurate logs and dashboard filtering.
 """
 import os
 import threading
-import resend  
+import smtplib
 import pytz
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from functools import wraps
 
 from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash, send_from_directory)
+                   redirect, url_for, session, flash)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'medihabit-super-secret-key-123')
+app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-key-123')
 
-# STEP 1: Define IST Timezone globally
+# STEP 1: FORCE IST Timezone globally
 IST = pytz.timezone('Asia/Kolkata')
 
-# Helper function for explicit IST time
 def get_ist_time():
+    """Helper to ensure all time operations use IST."""
     return datetime.now(IST)
 
 uri = os.environ.get('DATABASE_URL')
@@ -37,24 +39,33 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend API Email Logic ──────────────────────────────────────────────────
-resend.api_key = os.environ.get('RESEND_API_KEY')
+# ── Gmail SMTP Logic ────────────────────────────────────────────────────────
+# Updated to use your specific variable name: GMAIL_PASSWORD
+GMAIL_USER = os.environ.get('GMAIL_USER')
+GMAIL_PASS = os.environ.get('GMAIL_PASSWORD') 
 
 def send_smtp_email(to_email, subject, body):
-    if not resend.api_key:
-        print("❌ Error: RESEND_API_KEY not set")
+    """Sends email using Gmail SMTP and your Render Env Variables."""
+    if not GMAIL_USER or not GMAIL_PASS:
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in Render.")
         return False
+    
     try:
-        params = {
-            "from": "MediHabit <onboarding@resend.dev>",
-            "to": [to_email],
-            "subject": subject,
-            "text": body,
-        }
-        resend.Emails.send(params)
+        msg = MIMEMultipart()
+        msg['From'] = f"MediHabit <{GMAIL_USER}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Connect to Gmail's SMTP server
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_PASS)
+        server.send_message(msg)
+        server.quit()
         return True
     except Exception as e:
-        print(f"❌ Resend API Error: {str(e)}") 
+        print(f"❌ Gmail SMTP Error: {str(e)}") 
         return False
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -63,8 +74,7 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    # Uses lambda to capture IST time at the moment of creation
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
+    created_at = db.Column(db.DateTime, default=get_ist_time)
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, pw):
@@ -83,7 +93,6 @@ class Medication(db.Model):
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
     notes = db.Column(db.String(300))
-    email_enabled = db.Column(db.Boolean, default=True)
     active = db.Column(db.Boolean, default=True)
 
 class AlertLog(db.Model):
@@ -91,10 +100,8 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    # FIX 1: Forces the log to use IST time exactly when the alert is created/sent
-    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
+    sent_at = db.Column(db.DateTime, default=get_ist_time)
     status = db.Column(db.String(20), default='sent')
-    error = db.Column(db.String(300))
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def login_required(f):
@@ -127,7 +134,7 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            welcome_body = f"Hi {name},\n\nWelcome to MediHabit!"
+            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your medicine reminders are now active."
             threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
             
             flash("Account created! Please login.", "success")
@@ -160,24 +167,18 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    meds_js = [{"name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
-
-    # FIX 2: Force the "Today" check to be IST
+    
     now_ist = get_ist_time()
     today_ist_date = now_ist.date()
     
-    # Filter logs where the date part of 'sent_at' (stored in IST) matches today's IST date
+    # Filter logs to only show today's alerts in IST
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_ist_date
     ).order_by(AlertLog.sent_at.desc()).all()
     
     today_display = now_ist.strftime('%A, %d %b %Y')
-    return render_template('dashboard.html', 
-                           meds=meds, 
-                           meds_js=meds_js, 
-                           logs=logs, 
-                           today_date=today_display)
+    return render_template('dashboard.html', meds=meds, logs=logs, today_date=today_display)
 
 @app.route('/medication/add', methods=['POST'])
 @login_required
@@ -230,22 +231,18 @@ def delete_medication(id):
 def profile():
     user = User.query.get(session['user_id'])
     if request.method == 'POST':
-        try:
-            new_name = request.form.get('name')
-            if new_name:
-                user.name = new_name
-                session['user_name'] = new_name
-            
-            new_pw = request.form.get('password')
-            if new_pw and len(new_pw.strip()) > 0:
-                user.set_password(new_pw)
-            
-            db.session.commit()
-            flash("Profile updated successfully!", "success")
-            return redirect(url_for('dashboard'))
-        except Exception as e:
-            db.session.rollback()
-            flash("Error updating profile.", "danger")
+        new_name = request.form.get('name')
+        if new_name:
+            user.name = new_name
+            session['user_name'] = new_name
+        
+        new_pw = request.form.get('password')
+        if new_pw and len(new_pw.strip()) > 0:
+            user.set_password(new_pw)
+        
+        db.session.commit()
+        flash("Profile updated!", "success")
+        return redirect(url_for('dashboard'))
     return render_template('edit_profile.html', user=user)
 
 # ── Reminder Engine ───────────────────────────────────────────────────────────
@@ -254,10 +251,9 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med or not med.active: return
         subject = f"💊 Time for {med.name}"
-        body = f"Reminder: It is time to take {med.name}."
+        body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        # Log entry uses IST time for synchronization
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
@@ -270,7 +266,6 @@ def send_reminder_task(med_id):
 
 def check_and_send():
     with app.app_context():
-        # Get current IST time formatted as HH:MM
         now_str = get_ist_time().strftime('%H:%M')
         meds = Medication.query.filter_by(active=True).all()
         for m in meds:
@@ -281,7 +276,7 @@ def check_and_send():
 with app.app_context():
     db.create_all()
 
-# STEP 2: Configure APScheduler to use IST
+# Scheduler configured for IST
 scheduler = BackgroundScheduler(timezone=IST)
 scheduler.add_job(check_and_send, 'interval', minutes=1)
 scheduler.start()
