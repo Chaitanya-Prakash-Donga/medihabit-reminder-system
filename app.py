@@ -62,7 +62,7 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    # Corrected: Use lambda to ensure get_ist_time() is called at record creation
+    # UPDATED: Ensures IST time is captured at the moment of user creation
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
@@ -90,7 +90,7 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    # Corrected: Explicitly call IST time for logs
+    # UPDATED: Forces the log to use IST time exactly when the alert is sent
     sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
@@ -183,7 +183,7 @@ def dashboard():
     now_ist = get_ist_time()
     today_ist_date = now_ist.date()
     
-    # Ensure logs are filtered based on the corrected IST date
+    # Logs are filtered based on the corrected IST date from the model
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_ist_date
@@ -271,6 +271,7 @@ def send_reminder_task(med_id):
         body = f"Reminder: It is time to take {med.name}."
         success = send_smtp_email(med.recipient_email, subject, body)
         
+        # Log uses get_ist_time() to ensure synchronization with dashboard filtering
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
