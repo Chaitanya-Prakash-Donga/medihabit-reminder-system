@@ -1,211 +1,187 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <meta name="description" content="Manage your health with MediHabit medication reminders. Smart tracking and automated alerts for your daily health routines.">
-    <title>MediHabit — Dashboard</title>
-
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    <meta name="theme-color" content="#2196f3">
-    
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register("/sw.js");
-        });
-      }
-    </script>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediHabit - My Dashboard</title>
+    <link rel="manifest" href="/manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-        :root{--bg:#f5f5f3;--surface:#fff;--border:rgba(0,0,0,0.1);--text:#1a1a1a;--muted:#6b6b6b;--accent:#1a1a1a;--accent-fg:#fff;--info-bg:#E6F1FB;--info:#0C447C;--success-bg:#EAF3DE;--success:#27500A;--danger-bg:#FCEBEB;--danger:#791F1F;--radius:8px;--radius-lg:12px}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
-        input,select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;outline:none;transition:border-color .15s}
-        input:focus,select:focus{border-color:var(--accent)}
-        label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
-        .nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
-        .nav-logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:500;text-decoration:none;color:var(--text)}
-        .logo-icon{width:40px;height:40px;border-radius:8px;background:var(--info-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
-        .logo-icon img{width:100%;height:100%;object-fit:cover}
-        .avatar{width:30px;height:30px;border-radius:50%;background:var(--info-bg);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:var(--info)}
-        .page{max-width:760px;margin:0 auto;padding:1.5rem 1.25rem}
-        .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.25rem}
-        .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem}
-        .stat-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
-        .stat-label{font-size:11px;color:var(--muted);margin-bottom:4px}
-        .stat-val{font-size:24px;font-weight:500}
-        .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem 1.25rem;margin-bottom:1rem}
-        .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:14px;font-family:inherit;cursor:pointer;text-decoration:none;transition:background .15s}
-        .btn:hover{background:var(--bg)}
-        .btn-primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
-        .btn-sm{padding:5px 11px;font-size:12px}
-        .btn-info{border-color:#85B7EB;color:var(--info)}
-        .btn-danger{border-color:#F09595;color:var(--danger)}
-        .badge{font-size:11px;font-weight:500;padding:3px 8px;border-radius:20px}
-        .b-blue{background:var(--info-bg);color:var(--info)}
-        .med-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
-        .med-row:last-child{border-bottom:none}
-        .med-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--accent)}
-        .med-body{flex:1;min-width:0}
-        .med-name{font-size:14px;font-weight:500}
-        .med-sub{font-size:12px;color:var(--muted);margin-top:2px}
-        .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;align-items:center}
-        .chip{font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:2px 8px;color:var(--muted)}
-        .section-label{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}
-        .add-form{display:none;margin-bottom:1rem}
-        .add-form.open{display:block}
-        .field{margin-bottom:12px}
-        .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-        .empty{text-align:center;padding:2rem;color:var(--muted);font-size:13px}
-        .alert { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-size: 13px; text-align: center; }
-        .alert-success { background: var(--success-bg); color: var(--success); }
-        .alert-danger { background: var(--danger-bg); color: var(--danger); }
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background: #2c3e50; }
+        .card { border: none; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s; }
+        .card:hover { transform: translateY(-5px); }
+        .med-time { color: #3498db; font-weight: bold; }
+        .status-sent { color: #27ae60; font-weight: bold; }
+        .status-failed { color: #e74c3c; font-weight: bold; }
+        .btn-add { border-radius: 50px; padding: 10px 25px; background: #2ecc71; border: none; }
     </style>
 </head>
 <body>
 
-<header>
-    <nav class="nav">
-      <a href="{{ url_for('dashboard') }}" class="nav-logo">
-        <div class="logo-icon">
-            <img src="{{ url_for('static', filename='icon-192.png') }}" alt="MediHabit Logo" width="40" height="40">
+<nav class="navbar navbar-dark mb-4">
+    <div class="container">
+        <a class="navbar-brand" href="#"><i class="fas fa-pills me-2"></i> MediHabit</a>
+        <div class="d-flex align-items-center">
+            <span class="text-white me-3">Welcome, {{ session['user_name'] }}</span>
+            <a href="/profile" class="btn btn-outline-light btn-sm me-2">Profile</a>
+            <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
         </div>
-        MediHabit
-      </a>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="avatar">{{ session['user_name'][0]|upper if session['user_name'] else 'U' }}</div>
-        
-        <a href="{{ url_for('profile') }}" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500;">
-            {{ session['user_name'] }}
-        </a>
-
-        <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">Log out</a>
-      </div>
-    </nav>
-</header>
-
-<main class="page">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <div class="alert alert-{{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
-
-  <div class="page-header">
-    <div>
-      <h1 style="font-size:20px;font-weight:500">Dashboard</h1>
-      <p style="font-size:12px;color:var(--muted)">{{ today_date }} (IST)</p>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="toggleForm()" aria-label="Add a new medication">+ Add medication</button>
-  </div>
+</nav>
 
-  <div class="stat-grid">
-    <div class="stat-card"><div class="stat-label">Medications</div><div class="stat-val">{{ meds|length }}</div></div>
-    <div class="stat-card"><div class="stat-label">Alerts Configured</div><div class="stat-val">{{ (meds|selectattr('time1')|list|length) + (meds|selectattr('time2')|list|length) }}</div></div>
-    <div class="stat-card"><div class="stat-label">Sent Today</div><div class="stat-val">{{ logs|length }}</div></div>
-  </div>
-
-  <div id="add-form" class="add-form">
-    <div class="section-label">New medication</div>
-    <form action="{{ url_for('add_medication') }}" method="POST" class="card">
-      <div class="field"><label for="med_name">Medication name *</label><input type="text" id="med_name" name="name" required placeholder="e.g. Metformin 500mg"/></div>
-      <div class="row2">
-        <div class="field"><label for="med_dose">Dosage</label><input type="text" id="med_dose" name="dose" placeholder="e.g. 1 tablet"/></div>
-        <div class="field"><label for="med_freq">Frequency</label>
-          <select id="med_freq" name="frequency"><option>Once daily</option><option>Twice daily</option><option>Three times daily</option></select>
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h2 class="fw-bold">My Medications</h2>
+            <p class="text-muted">{{ today_date }} (Local Time)</p>
         </div>
-      </div>
-      <div class="row2">
-        <div class="field"><label for="time1">Time 1 *</label><input type="time" id="time1" name="time1" value="08:00" required/></div>
-        <div class="field"><label for="time2">Time 2 (optional)</label><input type="time" id="time2" name="time2"/></div>
-      </div>
-      <div class="field"><label for="email">Recipient email *</label><input type="email" id="email" name="recipient_email" required placeholder="patient@email.com"/></div>
-      <div class="field"><label for="notes">Notes</label><input type="text" id="notes" name="notes" placeholder="e.g. Take after meals"/></div>
-      <div style="display:flex;gap:8px">
-        <button type="submit" class="btn btn-primary btn-sm">Save & schedule</button>
-        <button type="button" class="btn btn-sm" onclick="toggleForm()">Cancel</button>
-      </div>
-    </form>
-  </div>
+        <div class="col-md-4 text-md-end">
+            <button class="btn btn-primary btn-add" data-bs-toggle="modal" data-bs-target="#addMedModal">
+                <i class="fas fa-plus me-2"></i> Add Medicine
+            </button>
+        </div>
+    </div>
 
-  <div class="section-label">Your medications</div>
-  <div class="card">
-    {% if not meds %}
-        <div class="empty">No medications yet. Start by adding one!</div>
-    {% else %}
-        {% for m in meds %}
-        <div class="med-row">
-          <div class="med-dot"></div>
-          <div class="med-body">
-            <div class="med-name">{{ m.name }}</div>
-            <div class="med-sub">{{ m.dose if m.dose else '' }} · {{ m.frequency }}</div>
-            <div class="chips">
-              <span class="chip">🕒 {{ m.time1 }}</span>
-              {% if m.time2 %}<span class="chip">🕒 {{ m.time2 }}</span>{% endif %}
+    <div class="row g-4">
+        {% for med in meds %}
+        <div class="col-md-4">
+            <div class="card h-100 p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h5 class="fw-bold mb-1">{{ med.name }}</h5>
+                    <a href="/medication/delete/{{ med.id }}" class="text-danger" onclick="return confirm('Remove this medication?')">
+                        <i class="fas fa-trash"></i>
+                    </a>
+                </div>
+                <p class="text-muted mb-2">Dose: {{ med.dose }}</p>
+                <div class="med-time">
+                    <i class="far fa-clock me-1"></i> {{ med.time1 }}
+                    {% if med.time2 %} | {{ med.time2 }}{% endif %}
+                </div>
+                <hr>
+                <small class="text-muted"><i class="fas fa-envelope me-1"></i> {{ med.recipient_email }}</small>
             </div>
-          </div>
-          <div class="med-acts">
-            <a href="{{ url_for('edit_medication', id=m.id) }}" class="btn btn-sm btn-info">Edit</a>
-            <a href="{{ url_for('delete_medication', id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Remove this medication?')">Remove</a>
-          </div>
         </div>
         {% endfor %}
-    {% endif %}
-  </div>
+    </div>
 
-  <div class="section-label">Today's alert log</div>
-  <div class="card">
-    {% if not logs %}
-        <div class="empty">No alerts sent yet.</div>
-    {% else %}
-        {% for log in logs %}
-        <div class="med-row">
-          <div style="font-size:18px" aria-hidden="true">
-            {% if log.status == 'sent' %}✉️{% else %}⚠️{% endif %}
-          </div>
-          <div class="med-body">
-            <div class="med-name">{{ log.medication_name }}</div>
-            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }} IST</div>
-          </div>
-          <div class="badge b-blue">Sent</div>
+    <div class="mt-5 mb-5">
+        <h4 class="fw-bold mb-3">Today's Activity Log</h4>
+        <div class="card p-3">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Medicine</th>
+                            <th>Recipient</th>
+                            <th>Time Sent</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td>{{ log.medication_name }}</td>
+                            <td>{{ log.recipient }}</td>
+                            <td>{{ log.sent_at.strftime('%I:%M %p') }}</td>
+                            <td class="status-{{ log.status }}">{{ log.status.upper() }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not logs %}
+                        <tr><td colspan="4" class="text-center text-muted">No alerts triggered today yet.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        {% endfor %}
-    {% endif %}
-  </div>
-</main>
+    </div>
+</div>
+
+<div class="modal fade" id="addMedModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form action="/medication/add" method="POST" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Schedule New Medication</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3"><label class="form-label">Medicine Name</label><input type="text" name="name" class="form-control" required></div>
+                <div class="mb-3"><label class="form-label">Dosage (e.g., 1 Pill)</label><input type="text" name="dose" class="form-control" required></div>
+                <div class="row mb-3">
+                    <div class="col"><label class="form-label">Time 1</label><input type="time" name="time1" class="form-control" required></div>
+                    <div class="col"><label class="form-label">Time 2 (Optional)</label><input type="time" name="time2" class="form-control"></div>
+                </div>
+                <div class="mb-3"><label class="form-label">Notification Email</label><input type="email" name="recipient_email" class="form-control" value="{{ session.get('user_email', '') }}" required></div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-primary w-100">Save Schedule</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-function toggleForm(){
-  document.getElementById('add-form').classList.toggle('open');
-}
+    // Data from Flask
+    const meds_js = {{ meds_js | tojson }};
+    
+    // Prevent duplicate triggers in the same minute
+    let sentThisMinute = new Set();
 
-// VOICE ALERT LOGIC SYNCED TO IST
-const meds = {{ meds_js | tojson }};
-const spokenHistory = new Set(); 
-
-setInterval(() => {
-    const nowIST = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    }).format(new Date());
-
-    meds.forEach(m => {
-        if ((m.t1 === nowIST || (m.t2 && m.t2 === nowIST)) && !spokenHistory.has(m.name + nowIST)) {
-            const msg = `Reminder! It is now ${nowIST}. Please take your ${m.name}.`;
-            const speech = new SpeechSynthesisUtterance(msg);
-            speech.lang = 'en-IN'; 
-            speech.rate = 0.9;
-            window.speechSynthesis.speak(speech);
-            
-            spokenHistory.add(m.name + nowIST); 
+    function checkLocalReminders() {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const localTime = `${hours}:${minutes}`;
+        
+        // Reset the duplicate-checker every time the clock hits 00 seconds
+        if (now.getSeconds() === 0) {
+            sentThisMinute.clear();
         }
-    });
-}, 30000);
+
+        meds_js.forEach(med => {
+            // Check if current user time matches medication time 1 or time 2
+            if ((med.t1 === localTime || (med.t2 && med.t2 === localTime)) && !sentThisMinute.has(med.name)) {
+                
+                console.log(`Triggering reminder for: ${med.name} at ${localTime}`);
+
+                // 1. Voice Alert (Only works if user has clicked the page once)
+                try {
+                    const msg = new SpeechSynthesisUtterance(`Time to take your medication: ${med.name}`);
+                    window.speechSynthesis.speak(msg);
+                } catch (e) {
+                    console.log("Speech failed - waiting for user interaction.");
+                }
+
+                // 2. Trigger Email (Backend call)
+                // We use med.id which we need to ensure is in our meds_js objects
+                fetch(`/trigger-reminder/${med.id}`, { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                // Mark as sent to prevent loop
+                sentThisMinute.add(med.name);
+            }
+        });
+    }
+
+    // Run clock check every second
+    setInterval(checkLocalReminders, 1000);
+
+    // Click listener to "unlock" voice for browser
+    document.addEventListener('click', () => {
+        const silent = new SpeechSynthesisUtterance("");
+        window.speechSynthesis.speak(silent);
+    }, { once: true });
+
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js');
+    }
 </script>
+
 </body>
 </html>
