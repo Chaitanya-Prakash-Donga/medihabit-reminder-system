@@ -60,6 +60,7 @@
         .empty{text-align:center;padding:2rem;color:var(--muted);font-size:13px}
         .alert { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-size: 13px; text-align: center; }
         .alert-success { background: var(--success-bg); color: var(--success); }
+        .alert-danger { background: var(--danger-bg); color: var(--danger); }
     </style>
 </head>
 <body>
@@ -103,8 +104,8 @@
 
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-label">Medications</div><div class="stat-val">{{ meds|length }}</div></div>
-    <div class="stat-card"><div class="stat-label">Alerts today</div><div class="stat-val">{{ (meds|selectattr('time1')|list|length) + (meds|selectattr('time2')|list|length) }}</div></div>
-    <div class="stat-card"><div class="stat-label">Sent today</div><div class="stat-val">{{ logs|length }}</div></div>
+    <div class="stat-card"><div class="stat-label">Alerts Configured</div><div class="stat-val">{{ (meds|selectattr('time1')|list|length) + (meds|selectattr('time2')|list|length) }}</div></div>
+    <div class="stat-card"><div class="stat-label">Sent Today</div><div class="stat-val">{{ logs|length }}</div></div>
   </div>
 
   <div id="add-form" class="add-form">
@@ -133,7 +134,7 @@
   <div class="section-label">Your medications</div>
   <div class="card">
     {% if not meds %}
-        <div class="empty">No medications yet.</div>
+        <div class="empty">No medications yet. Start by adding one!</div>
     {% else %}
         {% for m in meds %}
         <div class="med-row">
@@ -142,32 +143,38 @@
             <div class="med-name">{{ m.name }}</div>
             <div class="med-sub">{{ m.dose if m.dose else '' }} · {{ m.frequency }}</div>
             <div class="chips">
-              <span class="chip">{{ m.time1 }}</span>
-              {% if m.time2 %}<span class="chip">{{ m.time2 }}</span>{% endif %}
+              <span class="chip">🕒 {{ m.time1 }}</span>
+              {% if m.time2 %}<span class="chip">🕒 {{ m.time2 }}</span>{% endif %}
             </div>
           </div>
           <div class="med-acts">
             <a href="{{ url_for('edit_medication', id=m.id) }}" class="btn btn-sm btn-info">Edit</a>
-            <a href="{{ url_for('delete_medication', id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Remove this?')">Remove</a>
+            <a href="{{ url_for('delete_medication', id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Remove this medication?')">Remove</a>
           </div>
         </div>
         {% endfor %}
     {% endif %}
   </div>
 
-  <div class="section-label">Today's alert log</div>
+  <div class="section-label">Today's alert log (IST)</div>
   <div class="card">
     {% if not logs %}
-        <div class="empty">No alerts sent yet.</div>
+        <div class="empty">No alerts sent yet today.</div>
     {% else %}
         {% for log in logs %}
         <div class="med-row">
-          <div style="font-size:18px" aria-hidden="true">✉️</div>
+          <div style="font-size:18px" aria-hidden="true">
+              {% if log.status == 'sent' %}✉️{% else %}⚠️{% endif %}
+          </div>
           <div class="med-body">
             <div class="med-name">{{ log.medication_name }}</div>
-            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }} IST</div>
+            <div class="med-sub">
+                To: {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }}
+            </div>
           </div>
-          <div class="badge b-blue">Sent</div>
+          <div class="badge {% if log.status == 'sent' %}b-blue{% else %}btn-danger{% endif %}">
+              {{ log.status|capitalize }}
+          </div>
         </div>
         {% endfor %}
     {% endif %}
@@ -179,12 +186,12 @@ function toggleForm(){
   document.getElementById('add-form').classList.toggle('open');
 }
 
-// OPTIMIZED VOICE ALERT LOGIC
+// VOICE ALERT LOGIC SYNCED TO IST
 const meds = {{ meds_js | tojson }};
 const spokenHistory = new Set(); 
 
 setInterval(() => {
-    // Get current time formatted specifically to IST HH:mm (e.g., 10:52)
+    // Force browser to check current time in IST specifically
     const nowIST = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Asia/Kolkata',
         hour: '2-digit',
@@ -193,18 +200,18 @@ setInterval(() => {
     }).format(new Date());
 
     meds.forEach(m => {
-        // Compare set time (m.t1/m.t2) to current browser IST time
+        // Compare set time to current IST time
         if ((m.t1 === nowIST || (m.t2 && m.t2 === nowIST)) && !spokenHistory.has(m.name + nowIST)) {
-            const msg = `Attention! It is ${nowIST}. Time to take your medicine: ${m.name}.`;
+            const msg = `Reminder! It is now ${nowIST}. Please take your ${m.name}.`;
             const speech = new SpeechSynthesisUtterance(msg);
             speech.lang = 'en-IN'; // Indian accent
             speech.rate = 0.9;
             window.speechSynthesis.speak(speech);
             
-            spokenHistory.add(m.name + nowIST); // Prevents repeating within the same minute
+            spokenHistory.add(m.name + nowIST); 
         }
     });
-}, 30000); // Checks every 30 seconds
+}, 30000); // 30-second check interval
 </script>
 </body>
 </html>
