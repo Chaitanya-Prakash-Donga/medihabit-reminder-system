@@ -1,210 +1,202 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <meta name="description" content="Manage your health with MediHabit medication reminders. Smart tracking and automated alerts for your daily health routines.">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediHabit — Dashboard</title>
-
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    <meta name="theme-color" content="#2196f3">
-    
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register("/sw.js");
-        });
-      }
-    </script>
-
+    <link rel="manifest" href="/static/manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-        :root{--bg:#f5f5f3;--surface:#fff;--border:rgba(0,0,0,0.1);--text:#1a1a1a;--muted:#6b6b6b;--accent:#1a1a1a;--accent-fg:#fff;--info-bg:#E6F1FB;--info:#0C447C;--success-bg:#EAF3DE;--success:#27500A;--danger-bg:#FCEBEB;--danger:#791F1F;--radius:8px;--radius-lg:12px}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
-        input,select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;outline:none;transition:border-color .15s}
-        input:focus,select:focus{border-color:var(--accent)}
-        label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
-        .nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
-        .nav-logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:500;text-decoration:none;color:var(--text)}
-        .logo-icon{width:40px;height:40px;border-radius:8px;background:var(--info-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
-        .logo-icon img{width:100%;height:100%;object-fit:cover}
-        .avatar{width:30px;height:30px;border-radius:50%;background:var(--info-bg);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:var(--info)}
-        .page{max-width:760px;margin:0 auto;padding:1.5rem 1.25rem}
-        .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.25rem}
-        .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem}
-        .stat-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
-        .stat-label{font-size:11px;color:var(--muted);margin-bottom:4px}
-        .stat-val{font-size:24px;font-weight:500}
-        .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem 1.25rem;margin-bottom:1rem}
-        .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:14px;font-family:inherit;cursor:pointer;text-decoration:none;transition:background .15s}
-        .btn:hover{background:var(--bg)}
-        .btn-primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
-        .btn-sm{padding:5px 11px;font-size:12px}
-        .btn-info{border-color:#85B7EB;color:var(--info)}
-        .btn-danger{border-color:#F09595;color:var(--danger)}
-        .badge{font-size:11px;font-weight:500;padding:3px 8px;border-radius:20px}
-        .b-blue{background:var(--info-bg);color:var(--info)}
-        .med-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
-        .med-row:last-child{border-bottom:none}
-        .med-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--accent)}
-        .med-body{flex:1;min-width:0}
-        .med-name{font-size:14px;font-weight:500}
-        .med-sub{font-size:12px;color:var(--muted);margin-top:2px}
-        .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;align-items:center}
-        .chip{font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:2px 8px;color:var(--muted)}
-        .section-label{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}
-        .add-form{display:none;margin-bottom:1rem}
-        .add-form.open{display:block}
-        .field{margin-bottom:12px}
-        .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-        .empty{text-align:center;padding:2rem;color:var(--muted);font-size:13px}
-        .alert { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-size: 13px; text-align: center; }
-        .alert-success { background: var(--success-bg); color: var(--success); }
+        body { background-color: #f8f9fa; font-family: 'Inter', sans-serif; color: #333; }
+        .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; }
+        .nav-user { display: flex; align-items: center; gap: 10px; }
+        .avatar-circle { width: 35px; height: 35px; background: #e3f2fd; color: #1976d2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        
+        .stat-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #efefef; height: 100%; }
+        .stat-label { color: #888; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px; }
+        .stat-value { font-size: 2rem; font-weight: 700; }
+
+        .med-card { background: white; border-radius: 12px; padding: 25px; border: 1px solid #efefef; margin-bottom: 15px; position: relative; }
+        .med-name { font-size: 1.1rem; font-weight: 700; margin-bottom: 5px; }
+        .med-info { color: #666; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; }
+        .time-badge { background: #f0f0f0; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; }
+        
+        .log-item { background: white; border-top: 1px solid #f0f0f0; padding: 15px 25px; display: flex; align-items: center; justify-content: space-between; }
+        .log-item:first-child { border-top: none; }
+        .log-icon { color: #fbc02d; font-size: 1.2rem; }
+        .sent-badge { background: #e3f2fd; color: #1976d2; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        
+        .btn-add { background: #111; color: white; border-radius: 8px; padding: 8px 20px; font-weight: 500; }
+        .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; }
+        .btn-remove { border: 1px solid #ffcdd2; color: #d32f2f; }
     </style>
 </head>
 <body>
 
-<header>
-    <nav class="nav">
-      <a href="{{ url_for('dashboard') }}" class="nav-logo">
-        <div class="logo-icon">
-            <img src="{{ url_for('static', filename='icon-192.png') }}" alt="MediHabit Logo" width="40" height="40">
+<nav class="navbar mb-5">
+    <div class="container d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center gap-2">
+            <img src="/static/icon-192.png" width="30" alt="Logo">
+            <span class="fw-bold fs-5">MediHabit</span>
         </div>
-        MediHabit
-      </a>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="avatar">{{ session['user_name'][0]|upper if session['user_name'] else 'U' }}</div>
-        
-        <a href="{{ url_for('profile') }}" style="text-decoration:none; color:var(--muted); font-size:13px; font-weight:500;">
-            {{ session['user_name'] }}
-        </a>
-
-        <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">Log out</a>
-      </div>
-    </nav>
-</header>
-
-<main class="page">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <div class="alert alert-{{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
-
-  <div class="page-header">
-    <div>
-      <h1 style="font-size:20px;font-weight:500">Dashboard</h1>
-      <p style="font-size:12px;color:var(--muted)">{{ today_date }} (IST)</p>
+        <div class="nav-user">
+            <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
+            <span class="small text-muted">{{ session['user_name'] }}</span>
+            <a href="/logout" class="btn btn-sm btn-outline-danger ms-2">Log out</a>
+        </div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="toggleForm()" aria-label="Add a new medication">+ Add medication</button>
-  </div>
+</nav>
 
-  <div class="stat-grid">
-    <div class="stat-card"><div class="stat-label">Medications</div><div class="stat-val">{{ meds|length }}</div></div>
-    <div class="stat-card"><div class="stat-label">Alerts today</div><div class="stat-val">{{ (meds|selectattr('time1')|list|length) + (meds|selectattr('time2')|list|length) }}</div></div>
-    <div class="stat-card"><div class="stat-label">Sent today</div><div class="stat-val">{{ logs|length }}</div></div>
-  </div>
-
-  <div id="add-form" class="add-form">
-    <div class="section-label">New medication</div>
-    <form action="{{ url_for('add_medication') }}" method="POST" class="card">
-      <div class="field"><label for="med_name">Medication name *</label><input type="text" id="med_name" name="name" required placeholder="e.g. Metformin 500mg"/></div>
-      <div class="row2">
-        <div class="field"><label for="med_dose">Dosage</label><input type="text" id="med_dose" name="dose" placeholder="e.g. 1 tablet"/></div>
-        <div class="field"><label for="med_freq">Frequency</label>
-          <select id="med_freq" name="frequency"><option>Once daily</option><option>Twice daily</option><option>Three times daily</option></select>
+<div class="container">
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div>
+            <h1 class="h3 fw-bold mb-1">Dashboard</h1>
+            <p class="text-muted small mb-0">{{ today_date }} <span id="local-tz"></span></p>
         </div>
-      </div>
-      <div class="row2">
-        <div class="field"><label for="time1">Time 1 *</label><input type="time" id="time1" name="time1" value="08:00" required/></div>
-        <div class="field"><label for="time2">Time 2 (optional)</label><input type="time" id="time2" name="time2"/></div>
-      </div>
-      <div class="field"><label for="email">Recipient email *</label><input type="email" id="email" name="recipient_email" required placeholder="patient@email.com"/></div>
-      <div class="field"><label for="notes">Notes</label><input type="text" id="notes" name="notes" placeholder="e.g. Take after meals"/></div>
-      <div style="display:flex;gap:8px">
-        <button type="submit" class="btn btn-primary btn-sm">Save & schedule</button>
-        <button type="button" class="btn btn-sm" onclick="toggleForm()">Cancel</button>
-      </div>
-    </form>
-  </div>
+        <button class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addMedModal">+ Add medication</button>
+    </div>
 
-  <div class="section-label">Your medications</div>
-  <div class="card">
-    {% if not meds %}
-        <div class="empty">No medications yet.</div>
-    {% else %}
-        {% for m in meds %}
-        <div class="med-row">
-          <div class="med-dot"></div>
-          <div class="med-body">
-            <div class="med-name">{{ m.name }}</div>
-            <div class="med-sub">{{ m.dose if m.dose else '' }} · {{ m.frequency }}</div>
-            <div class="chips">
-              <span class="chip">{{ m.time1 }}</span>
-              {% if m.time2 %}<span class="chip">{{ m.time2 }}</span>{% endif %}
+    <div class="row g-3 mb-5">
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">Medications</div>
+                <div class="stat-value">{{ meds|length }}</div>
             </div>
-          </div>
-          <div class="med-acts">
-            <a href="{{ url_for('edit_medication', id=m.id) }}" class="btn btn-sm btn-info">Edit</a>
-            <a href="{{ url_for('delete_medication', id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Remove this?')">Remove</a>
-          </div>
         </div>
-        {% endfor %}
-    {% endif %}
-  </div>
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">Alerts Configured</div>
+                <div class="stat-value">{{ meds|length }}</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">Sent Today</div>
+                <div class="stat-value">{{ logs|length }}</div>
+            </div>
+        </div>
+    </div>
 
-  <div class="section-label">Today's alert log</div>
-  <div class="card">
-    {% if not logs %}
-        <div class="empty">No alerts sent yet.</div>
-    {% else %}
+    <h6 class="text-muted fw-bold small text-uppercase mb-3">Your Medications</h6>
+    {% for med in meds %}
+    <div class="med-card d-flex justify-content-between align-items-center">
+        <div>
+            <div class="med-name">{{ med.name }}</div>
+            <div class="med-info">
+                <i class="fas fa-circle" style="font-size: 8px;"></i>
+                {{ med.dose }} · Once daily
+            </div>
+            <div class="time-badge">
+                <i class="far fa-clock"></i> {{ med.time1 }}{% if med.time2 %} · {{ med.time2 }}{% endif %}
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/medication/edit/{{ med.id }}" class="btn-outline">Edit</a>
+            <a href="/medication/delete/{{ med.id }}" class="btn-outline btn-remove">Remove</a>
+        </div>
+    </div>
+    {% endfor %}
+
+    <h6 class="text-muted fw-bold small text-uppercase mt-5 mb-3">Today's Alert Log</h6>
+    <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 12px;">
         {% for log in logs %}
-        <div class="med-row">
-          <div style="font-size:18px" aria-hidden="true">✉️</div>
-          <div class="med-body">
-            <div class="med-name">{{ log.medication_name }}</div>
-            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }} IST</div>
-          </div>
-          <div class="badge b-blue">Sent</div>
+        <div class="log-item">
+            <div class="d-flex align-items-center gap-3">
+                <i class="fas fa-exclamation-triangle log-icon"></i>
+                <div>
+                    <div class="fw-bold small">{{ log.medication_name }}</div>
+                    <div class="text-muted" style="font-size: 0.8rem;">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }}</div>
+                </div>
+            </div>
+            <div class="sent-badge">Sent</div>
         </div>
         {% endfor %}
-    {% endif %}
-  </div>
-</main>
+        {% if not logs %}
+        <div class="p-4 text-center text-muted small">No alerts sent today.</div>
+        {% endif %}
+    </div>
+</div>
 
+<div class="modal fade" id="addMedModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="/medication/add" method="POST" class="modal-content border-0" style="border-radius: 15px;">
+            <div class="modal-body p-4">
+                <h5 class="fw-bold mb-4">Add Medication</h5>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Medicine Name</label>
+                    <input type="text" name="name" class="form-control bg-light border-0" required>
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Dosage</label>
+                    <input type="text" name="dose" class="form-control bg-light border-0" placeholder="e.g. 1 / 20mg" required>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col">
+                        <label class="small fw-bold text-muted">Time 1</label>
+                        <input type="time" name="time1" class="form-control bg-light border-0" required>
+                    </div>
+                    <div class="col">
+                        <label class="small fw-bold text-muted">Time 2 (Optional)</label>
+                        <input type="time" name="time2" class="form-control bg-light border-0">
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="small fw-bold text-muted">Recipient Email</label>
+                    <input type="email" name="recipient_email" class="form-control bg-light border-0" value="{{ session.get('user_email', '') }}" required>
+                </div>
+                <button type="submit" class="btn btn-dark w-100 py-2">Save Medication</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-function toggleForm(){
-  document.getElementById('add-form').classList.toggle('open');
-}
+    // 1. Pass data from Flask
+    const meds_js = {{ meds_js | tojson }};
+    let sentThisMinute = new Set();
 
-// OPTIMIZED VOICE ALERT LOGIC
-const meds = {{ meds_js | tojson }};
-const spokenHistory = new Set(); 
+    // Show the user's local timezone name next to the date
+    document.getElementById('local-tz').innerText = `(${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
 
-setInterval(() => {
-    // Get current time formatted specifically to IST HH:mm (e.g., 10:52)
-    const nowIST = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    }).format(new Date());
+    function checkLocalTime() {
+        const now = new Date();
+        const currentTime = now.getHours().toString().padStart(2, '0') + ":" + 
+                            now.getMinutes().toString().padStart(2, '0');
 
-    meds.forEach(m => {
-        // Compare set time (m.t1/m.t2) to current browser IST time
-        if ((m.t1 === nowIST || (m.t2 && m.t2 === nowIST)) && !spokenHistory.has(m.name + nowIST)) {
-            const msg = `Attention! It is ${nowIST}. Time to take your medicine: ${m.name}.`;
-            const speech = new SpeechSynthesisUtterance(msg);
-            speech.lang = 'en-IN'; // Indian accent
-            speech.rate = 0.9;
-            window.speechSynthesis.speak(speech);
-            
-            spokenHistory.add(m.name + nowIST); // Prevents repeating within the same minute
+        // Clear the "already sent" list at the start of every new minute
+        if (now.getSeconds() === 0) {
+            sentThisMinute.clear();
         }
-    });
-}, 30000); // Checks every 30 seconds
+
+        meds_js.forEach(med => {
+            if ((med.t1 === currentTime || (med.t2 && med.t2 === currentTime)) && !sentThisMinute.has(med.id)) {
+                
+                console.log(`Alert triggered for ${med.name} at ${currentTime} local time.`);
+                
+                // Trigger voice synthesis (requires user interaction first)
+                try {
+                    const speech = new SpeechSynthesisUtterance(`Reminder: Time to take ${med.name}`);
+                    window.speechSynthesis.speak(speech);
+                } catch (e) {}
+
+                // Notify Backend to send the Email
+                fetch(`/trigger-reminder/${med.id}`, { method: 'POST' });
+
+                sentThisMinute.add(med.id);
+            }
+        });
+    }
+
+    // Check time every second
+    setInterval(checkLocalTime, 1000);
+
+    // One-time interaction to unlock browser voice synthesis
+    document.addEventListener('click', () => {
+        const silent = new SpeechSynthesisUtterance("");
+        window.speechSynthesis.speak(silent);
+    }, { once: true });
 </script>
 </body>
 </html>
