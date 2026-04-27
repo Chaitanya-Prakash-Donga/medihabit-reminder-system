@@ -4,10 +4,12 @@ Full Flask backend: auth, CRUD, Gmail SMTP email alerts, APScheduler
 """
 import os
 import threading
-import resend  
+import smtplib
 import pytz
 from datetime import datetime
 from functools import wraps
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from flask import (Flask, render_template, request,
                    redirect, url_for, session, flash, send_from_directory)
@@ -36,24 +38,31 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend API Email Logic ──────────────────────────────────────────────────
-resend.api_key = os.environ.get('RESEND_API_KEY')
-
+# ── Gmail SMTP Email Logic ──────────────────────────────────────────────────
 def send_smtp_email(to_email, subject, body):
-    if not resend.api_key:
-        print("❌ Error: RESEND_API_KEY not set")
+    sender_email = os.environ.get('GMAIL_USER')
+    sender_password = os.environ.get('GMAIL_PASSWORD')
+    
+    if not sender_email or not sender_password:
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in environment")
         return False
+
     try:
-        params = {
-            "from": "MediHabit <onboarding@resend.dev>",
-            "to": [to_email],
-            "subject": subject,
-            "text": body,
-        }
-        resend.Emails.send(params)
+        msg = MIMEMultipart()
+        msg['From'] = f"MediHabit <{sender_email}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Standard Gmail SMTP Setup
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
         return True
     except Exception as e:
-        print(f"❌ Resend API Error: {str(e)}") 
+        print(f"❌ Gmail SMTP Error: {str(e)}") 
         return False
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -62,7 +71,6 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    # Corrected: Use lambda to ensure get_ist_time() is called at record creation
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
@@ -90,8 +98,8 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    # Corrected: Explicitly call IST time for logs
-    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(IST))
+    # Removed default here to set it manually in the task for better accuracy
+    sent_at = db.Column(db.DateTime, nullable=False) 
     status = db.Column(db.String(20), default='sent')
     error = db.Column(db.String(300))
 
@@ -183,7 +191,6 @@ def dashboard():
     now_ist = get_ist_time()
     today_ist_date = now_ist.date()
     
-    # Ensure logs are filtered based on the corrected IST date
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_ist_date
@@ -267,10 +274,12 @@ def send_reminder_task(med_id):
     with app.app_context():
         med = Medication.query.get(med_id)
         if not med or not med.active: return
+        
         subject = f"💊 Time for {med.name}"
         body = f"Reminder: It is time to take {med.name}."
         success = send_smtp_email(med.recipient_email, subject, body)
         
+        # Manually assign the IST time here to ensure accuracy
         log = AlertLog(
             user_id=med.user_id, 
             medication_name=med.name, 
