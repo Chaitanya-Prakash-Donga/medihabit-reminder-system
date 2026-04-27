@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediHabit - My Dashboard</title>
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/static/manifest.json">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
@@ -16,6 +16,8 @@
         .status-sent { color: #27ae60; font-weight: bold; }
         .status-failed { color: #e74c3c; font-weight: bold; }
         .btn-add { border-radius: 50px; padding: 10px 25px; background: #2ecc71; border: none; }
+        /* Style for the alert log rows to match your previous layout */
+        .table-hover tbody tr:hover { background-color: #f1f8ff; }
     </style>
 </head>
 <body>
@@ -34,7 +36,7 @@
 <div class="container">
     <div class="row mb-4">
         <div class="col-md-8">
-            <h2 class="fw-bold">My Medications</h2>
+            <h2 class="fw-bold">My Dashboard</h2>
             <p class="text-muted">{{ today_date }} (Local Time)</p>
         </div>
         <div class="col-md-4 text-md-end">
@@ -44,20 +46,29 @@
         </div>
     </div>
 
+    <div class="row mb-4 g-3">
+        <div class="col-md-4"><div class="card p-3"><h6>Medications</h6><h3>{{ meds|length }}</h3></div></div>
+        <div class="col-md-4"><div class="card p-3"><h6>Alerts Configured</h6><h3>{{ meds|length }}</h3></div></div>
+        <div class="col-md-4"><div class="card p-3"><h6>Sent Today</h6><h3>{{ logs|length }}</h3></div></div>
+    </div>
+
+    <h4 class="fw-bold mb-3">Your Medications</h4>
     <div class="row g-4">
         {% for med in meds %}
         <div class="col-md-4">
             <div class="card h-100 p-3">
                 <div class="d-flex justify-content-between align-items-start">
                     <h5 class="fw-bold mb-1">{{ med.name }}</h5>
-                    <a href="/medication/delete/{{ med.id }}" class="text-danger" onclick="return confirm('Remove this medication?')">
-                        <i class="fas fa-trash"></i>
-                    </a>
+                    <div>
+                        <a href="/medication/edit/{{ med.id }}" class="text-primary me-2"><i class="fas fa-edit"></i></a>
+                        <a href="/medication/delete/{{ med.id }}" class="text-danger" onclick="return confirm('Remove this medication?')">
+                            <i class="fas fa-trash"></i>
+                        </a>
+                    </div>
                 </div>
                 <p class="text-muted mb-2">Dose: {{ med.dose }}</p>
                 <div class="med-time">
-                    <i class="far fa-clock me-1"></i> {{ med.time1 }}
-                    {% if med.time2 %} | {{ med.time2 }}{% endif %}
+                    <i class="far fa-clock me-1"></i> {{ med.time1 }}{% if med.time2 %} | {{ med.time2 }}{% endif %}
                 </div>
                 <hr>
                 <small class="text-muted"><i class="fas fa-envelope me-1"></i> {{ med.recipient_email }}</small>
@@ -70,7 +81,7 @@
         <h4 class="fw-bold mb-3">Today's Activity Log</h4>
         <div class="card p-3">
             <div class="table-responsive">
-                <table class="table table-hover">
+                <table class="table table-hover align-middle">
                     <thead>
                         <tr>
                             <th>Medicine</th>
@@ -82,10 +93,14 @@
                     <tbody>
                         {% for log in logs %}
                         <tr>
-                            <td>{{ log.medication_name }}</td>
+                            <td><strong>{{ log.medication_name }}</strong></td>
                             <td>{{ log.recipient }}</td>
                             <td>{{ log.sent_at.strftime('%I:%M %p') }}</td>
-                            <td class="status-{{ log.status }}">{{ log.status.upper() }}</td>
+                            <td>
+                                <span class="badge bg-light text-{{ 'success' if log.status == 'sent' else 'danger' }} border">
+                                    {{ log.status.upper() }}
+                                </span>
+                            </td>
                         </tr>
                         {% endfor %}
                         {% if not logs %}
@@ -124,60 +139,56 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-    // Data from Flask
+    // 1. Get data from Flask (includes 'id' for the trigger route)
     const meds_js = {{ meds_js | tojson }};
-    
-    // Prevent duplicate triggers in the same minute
     let sentThisMinute = new Set();
 
-    function checkLocalReminders() {
+    // 2. The Location-Based Watcher
+    function checkReminders() {
         const now = new Date();
         const hours = String(now.getHours()).padStart(2, '0');
         const minutes = String(now.getMinutes()).padStart(2, '0');
         const localTime = `${hours}:${minutes}`;
         
-        // Reset the duplicate-checker every time the clock hits 00 seconds
+        // Reset the tracker at the top of every minute
         if (now.getSeconds() === 0) {
             sentThisMinute.clear();
         }
 
         meds_js.forEach(med => {
             // Check if current user time matches medication time 1 or time 2
-            if ((med.t1 === localTime || (med.t2 && med.t2 === localTime)) && !sentThisMinute.has(med.name)) {
+            if ((med.t1 === localTime || (med.t2 && med.t2 === localTime)) && !sentThisMinute.has(med.id)) {
                 
-                console.log(`Triggering reminder for: ${med.name} at ${localTime}`);
+                console.log(`Triggering reminder for: ${med.name}`);
 
-                // 1. Voice Alert (Only works if user has clicked the page once)
+                // Voice Alert
                 try {
                     const msg = new SpeechSynthesisUtterance(`Time to take your medication: ${med.name}`);
                     window.speechSynthesis.speak(msg);
-                } catch (e) {
-                    console.log("Speech failed - waiting for user interaction.");
-                }
+                } catch (e) { console.log("Speech synthesis blocked."); }
 
-                // 2. Trigger Email (Backend call)
-                // We use med.id which we need to ensure is in our meds_js objects
+                // Tell the server to send the email
                 fetch(`/trigger-reminder/${med.id}`, { 
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                // Mark as sent to prevent loop
-                sentThisMinute.add(med.name);
+                // Mark as sent for this specific minute/ID
+                sentThisMinute.add(med.id);
             }
         });
     }
 
     // Run clock check every second
-    setInterval(checkLocalReminders, 1000);
+    setInterval(checkReminders, 1000);
 
-    // Click listener to "unlock" voice for browser
+    // Unlock voice for browser on first click
     document.addEventListener('click', () => {
         const silent = new SpeechSynthesisUtterance("");
         window.speechSynthesis.speak(silent);
     }, { once: true });
 
-    // Register Service Worker for PWA
+    // Register PWA Service Worker
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js');
     }
