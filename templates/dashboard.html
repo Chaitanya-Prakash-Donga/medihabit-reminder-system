@@ -156,25 +156,21 @@
     {% endif %}
   </div>
 
-  <div class="section-label">Today's alert log (IST)</div>
+  <div class="section-label">Today's alert log</div>
   <div class="card">
     {% if not logs %}
-        <div class="empty">No alerts sent yet today.</div>
+        <div class="empty">No alerts sent yet.</div>
     {% else %}
         {% for log in logs %}
         <div class="med-row">
           <div style="font-size:18px" aria-hidden="true">
-              {% if log.status == 'sent' %}✉️{% else %}⚠️{% endif %}
+            {% if log.status == 'sent' %}✉️{% else %}⚠️{% endif %}
           </div>
           <div class="med-body">
             <div class="med-name">{{ log.medication_name }}</div>
-            <div class="med-sub">
-                To: {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }}
-            </div>
+            <div class="med-sub">Sent to {{ log.recipient }} at {{ log.sent_at.strftime('%H:%M') }} IST</div>
           </div>
-          <div class="badge {% if log.status == 'sent' %}b-blue{% else %}btn-danger{% endif %}">
-              {{ log.status|capitalize }}
-          </div>
+          <div class="badge b-blue">Sent</div>
         </div>
         {% endfor %}
     {% endif %}
@@ -191,7 +187,6 @@ const meds = {{ meds_js | tojson }};
 const spokenHistory = new Set(); 
 
 setInterval(() => {
-    // Force browser to check current time in IST specifically
     const nowIST = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Asia/Kolkata',
         hour: '2-digit',
@@ -200,18 +195,17 @@ setInterval(() => {
     }).format(new Date());
 
     meds.forEach(m => {
-        // Compare set time to current IST time
         if ((m.t1 === nowIST || (m.t2 && m.t2 === nowIST)) && !spokenHistory.has(m.name + nowIST)) {
             const msg = `Reminder! It is now ${nowIST}. Please take your ${m.name}.`;
             const speech = new SpeechSynthesisUtterance(msg);
-            speech.lang = 'en-IN'; // Indian accent
+            speech.lang = 'en-IN'; 
             speech.rate = 0.9;
             window.speechSynthesis.speak(speech);
             
             spokenHistory.add(m.name + nowIST); 
         }
     });
-}, 30000); // 30-second check interval
+}, 30000);
 </script>
 </body>
 </html>
