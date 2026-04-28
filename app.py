@@ -1,11 +1,13 @@
 """
-MediHabit - app.py (Final Updated)
-Enhanced: Subject line formatting, stylish HTML email templates, and added login buttons.
+MediHabit - app.py
+Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
+Trigger-based reminders for universal timezone support.
 """
 import os
 import threading
 import smtplib
-from datetime import datetime, timedelta
+import pytz
+from datetime import datetime
 from functools import wraps
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -17,11 +19,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
+# Using SECURITY_KEY or SECRET_KEY from environment
+app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
 
-# Standardizing URL to ensure mail links work correctly (replace with your real domain if deploying)
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
-
+# Helper: Get current time as a 'naive' object for DB consistency
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -31,16 +32,14 @@ if uri and uri.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///medihabit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle": 280}
+
 db = SQLAlchemy(app)
 
-# ── Email Styling Constants (Global for Consistency) ───────────────────────
-EMAIL_LINK_STYLE = "color: #fff; background-color: #3498db; padding: 10px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 15px;"
-EMAIL_BODY_STYLE = "font-family: Arial, sans-serif; line-height: 1.6; color: #333; padding: 20px;"
-
-# ── Enhanced HTML Email Logic ────────────────────────────────────────────────
-def send_smtp_email(to_email, subject, html_body):
+# ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
+def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
-    sender_password = os.environ.get('GMAIL_PASSWORD')
+    sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
     
     if not sender_email or not sender_password:
         print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
@@ -51,7 +50,7 @@ def send_smtp_email(to_email, subject, html_body):
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
-        msg.attach(MIMEText(html_body, 'html'))
+        msg.attach(MIMEText(body, 'plain'))
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
@@ -72,6 +71,7 @@ class User(db.Model):
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
+
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
 
@@ -80,6 +80,7 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
+    frequency = db.Column(db.String(50))
     time1 = db.Column(db.String(5))   
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
@@ -125,38 +126,9 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # ── ENHANCED WELCOME MAIL (HTML with Login Link) ──
-            welcome_html = f"""
-            <html>
-                <body style="{EMAIL_BODY_STYLE}">
-                    <div style="background-color: #2c3e50; padding: 10px; border-radius: 5px; color: #fff; text-align: center;">
-                        <h1>Welcome to MediHabit! 💊</h1>
-                    </div>
-                    <p>Hello <strong>{name}</strong>,</p>
-                    <p>We are thrilled to welcome you to your new Health & Habit Companion! You've taken the first step toward better medication adherence and a healthier routine.</p>
-                    <p>Your account is fully configured to help you stay on schedule. You can now access your dashboard to manage your wellness journey with precision.</p>
-                    
-                    <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; border-left: 5px solid #2c3e50; margin: 20px 0;">
-                        <h3>How to get started:</h3>
-                        <ul style="padding-left: 20px;">
-                            <li><strong>Add Medications:</strong> Create your schedule with dosages and specific times.</li>
-                            <li><strong>Set Up Notifications:</strong> Receive automated email reminders like this one.</li>
-                            <li><strong>View Progress:</strong> Monitor your consistency over time.</li>
-                        </ul>
-                    </div>
-
-                    <p>Please click the button below to log in and start configuring your reminders:</p>
-                    
-                    <div style="text-align: center;">
-                        <a href="{BASE_URL + url_for('login')}" style="{EMAIL_LINK_STYLE}">Access Your Dashboard</a>
-                    </div>
-                    
-                    <p>We are here to support your routine every step of the way. If you have any questions, simply reply to this email.</p>
-                    <p>Best regards,<br><strong>The MediHabit Team</strong></p>
-                </body>
-            </html>
-            """
-            threading.Thread(target=send_smtp_email, args=(email, "Welcome to MediHabit! 💊", welcome_html)).start()
+            # Welcome Mail
+            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your medicine reminders are now ready."
+            threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
             
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
@@ -188,15 +160,21 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
     
+    # Critical: Include 'id' so JavaScript can call the trigger route
+    meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
+
+    # Show logs for today (based on server date)
     today_date = get_now_naive().date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_date
     ).order_by(AlertLog.sent_at.desc()).all()
     
-    return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, 
+    return render_template('dashboard.html', 
+                           meds=meds, 
+                           meds_js=meds_js, 
+                           logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
 @app.route('/medication/add', methods=['POST'])
@@ -208,8 +186,7 @@ def add_medication():
         dose=request.form.get('dose'),
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
-        recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes')
+        recipient_email=request.form.get('recipient_email')
     )
     db.session.add(m)
     db.session.commit()
@@ -225,23 +202,11 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── Trigger Route with Duplicate Prevention ──────────────────────────
+# ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # Cooldown check to prevent duplicates
-    cooldown_period = datetime.now() - timedelta(minutes=2)
-    med_name = Medication.query.get(med_id).name
-    
-    recent_log = AlertLog.query.filter(
-        AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == med_name,
-        AlertLog.sent_at >= cooldown_period
-    ).first()
-
-    if recent_log:
-        return jsonify({"status": "already_sent_recently"}), 200
-
+    """Called by the Browser JS when the local clock matches med time."""
     threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
     return jsonify({"status": "received"}), 200
 
@@ -250,48 +215,9 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med: return
         
-        # ── UPDATED SUBJECT LINE (FORMATTED PER REQUEST) ──
-        # New format: "💊 Time for Dolo"
         subject = f"💊 Time for {med.name}"
-        
-        # Handle empty notes
-        display_note = med.notes if med.notes else "No specific instructions provided."
-        
-        # ── ENHANCED REMINDER MAIL (HTML with Login Link and Styled Notes) ──
-        reminder_html = f"""
-        <html>
-            <body style="{EMAIL_BODY_STYLE}">
-                <div style="background-color: #d35400; padding: 10px; border-radius: 5px; color: #fff; text-align: center;">
-                    <h1>Health Alert: Medication Due Now</h1>
-                </div>
-                <p>This is a scheduled notification from your tracker to ensure you stay consistent with your medical regimen.</p>
-                
-                <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 5px solid #d35400; margin: 20px 0;">
-                    <p style="margin-top: 0;"><strong>Medication Details:</strong></p>
-                    <ul style="padding-left: 20px;">
-                        <li><strong>Name:</strong> {med.name}</li>
-                        <li><strong>Dosage:</strong> {med.dose}</li>
-                    </ul>
-                    <p><strong>Important Note:</strong></p>
-                    <blockquote style="font-style: italic; color: #555; background-color: #fff; padding: 10px; border-radius: 3px; margin: 0;">
-                        "{display_note}"
-                    </blockquote>
-                </div>
-
-                <h3>Next Steps:</h3>
-                <p>Please take your dose as soon as possible. Once completed, we encourage you to log in to your dashboard to mark this as "Taken." This helps maintain accurate logs for your health report.</p>
-                
-                <div style="text-align: center;">
-                    <a href="{BASE_URL + url_for('login')}" style="{EMAIL_LINK_STYLE}">Mark Dose as Taken</a>
-                </div>
-                
-                <p style="margin-top: 20px;"><em>Stay healthy and stay on track!</em></p>
-                <p>Best regards,<br><strong>The MediHabit Team</strong></p>
-            </body>
-        </html>
-        """
-        
-        success = send_smtp_email(med.recipient_email, subject, reminder_html)
+        body = f"Reminder: It is time to take {med.name} ({med.dose})."
+        success = send_smtp_email(med.recipient_email, subject, body)
         
         log = AlertLog(
             user_id=med.user_id, 
@@ -317,5 +243,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    # Keep the reloader disabled to maintain duplicate prevention logic
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=True)
