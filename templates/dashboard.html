@@ -10,8 +10,49 @@
     <style>
         body { background-color: #f8f9fa; font-family: 'Inter', sans-serif; color: #333; }
         .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; }
-        .nav-user { display: flex; align-items: center; gap: 10px; }
-        .avatar-circle { width: 35px; height: 35px; background: #e3f2fd; color: #1976d2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        
+        /* Increased Header Sizes */
+        .dashboard-logo { 
+            width: 50px; /* Increased from 30px */ 
+            height: auto; 
+        }
+        .dashboard-brand-text { 
+            font-size: 1.8rem; /* Increased font size */ 
+            font-weight: bold; 
+        }
+
+        /* User Profile Styling */
+        .user-profile-clickable {
+            display: flex;
+            align-items: center;
+            gap: 15px; /* Increase gap for larger items */
+            text-decoration: none; /* Remove underline from link */
+            color: inherit; /* Use default text color */
+            padding: 5px 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s; /* Smooth hover transition */
+        }
+        .user-profile-clickable:hover {
+            background-color: #f0f0f0; /* Hover effect */
+        }
+
+        /* Increased Profile Elements */
+        .avatar-circle { 
+            width: 45px; /* Increased from 35px */ 
+            height: 45px; 
+            background: #e3f2fd; 
+            color: #1976d2; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-weight: bold; 
+            font-size: 1.2rem; /* Increased text inside avatar */
+        }
+        .username-text { 
+            font-size: 1.1rem; /* Increased username font size */ 
+            font-weight: bold; 
+        }
         
         .stat-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #efefef; height: 100%; }
         .stat-label { color: #888; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px; }
@@ -30,26 +71,22 @@
         .btn-add { background: #111; color: white; border-radius: 8px; padding: 8px 20px; font-weight: 500; }
         .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; }
         .btn-remove { border: 1px solid #ffcdd2; color: #d32f2f; }
-        
-        /* Style for the profile link to match your theme */
-        .btn-profile { border: 1px solid #1976d2; color: #1976d2; font-size: 0.8rem; border-radius: 8px; padding: 4px 10px; text-decoration: none; transition: 0.2s; }
-        .btn-profile:hover { background: #1976d2; color: white; }
     </style>
 </head>
 <body>
 
 <nav class="navbar mb-5">
     <div class="container d-flex justify-content-between align-items-center">
-        <div class="d-flex align-items-center gap-2">
-            <img src="/static/icon-192.png" width="30" alt="Logo">
-            <span class="fw-bold fs-5">MediHabit</span>
+        <div class="d-flex align-items-center gap-3">
+            <img src="/static/icon-192.png" class="dashboard-logo" alt="Logo">
+            <span class="dashboard-brand-text">MediHabit</span>
         </div>
-        <div class="nav-user">
-            <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
-            <div class="d-flex flex-column">
-                <span class="small fw-bold text-dark">{{ session['user_name'] }}</span>
-                <a href="{{ url_for('edit_profile') }}" class="btn-profile">Edit Profile</a>
-            </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <a href="{{ url_for('edit_profile') }}" class="user-profile-clickable" title="Edit Profile">
+                <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
+                <span class="username-text">{{ session['user_name'] }}</span>
+            </a>
             <a href="/logout" class="btn btn-sm btn-outline-danger ms-2">Log out</a>
         </div>
     </div>
@@ -90,10 +127,8 @@
         </div>
         <div class="col-md-4">
             <div class="stat-card">
-                <div class="stat-card">
-                    <div class="stat-label">Sent Today</div>
-                    <div class="stat-value">{{ logs|length }}</div>
-                </div>
+                <div class="stat-label">Sent Today</div>
+                <div class="stat-value">{{ logs|length }}</div>
             </div>
         </div>
     </div>
