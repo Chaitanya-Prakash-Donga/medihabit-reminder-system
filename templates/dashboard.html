@@ -186,10 +186,16 @@
                         <input type="time" name="time2" class="form-control bg-light border-0">
                     </div>
                 </div>
-                <div class="mb-4">
+                <div class="mb-3">
                     <label class="small fw-bold text-muted">Recipient Email</label>
                     <input type="email" name="recipient_email" class="form-control bg-light border-0" value="{{ session.get('user_email', '') }}" required>
                 </div>
+                
+                <div class="mb-4">
+                    <label class="small fw-bold text-muted">Notes (Optional)</label>
+                    <textarea name="notes" class="form-control bg-light border-0" rows="2" placeholder="e.g. Take with food"></textarea>
+                </div>
+
                 <button type="submit" class="btn btn-dark w-100 py-2">Save Medication</button>
             </div>
         </form>
