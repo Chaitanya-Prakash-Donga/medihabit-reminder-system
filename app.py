@@ -141,7 +141,6 @@ def register():
             Stay Healthy,
             The MediHabit Team
             """
-            # Trigger the email in a background thread
             threading.Thread(target=send_smtp_email, args=(email, welcome_subject, welcome_body), daemon=True).start()
             
             flash("Account created! Please login.", "success")
@@ -227,6 +226,7 @@ def profile():
 
     return render_template('edit_profile.html', user=user_obj)
 
+# ── UPDATED: ADD MEDICATION ROUTE WITH NOTES ──────────────────────────────────
 @app.route('/medication/add', methods=['POST'])
 @login_required
 def add_medication():
@@ -237,7 +237,7 @@ def add_medication():
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
         recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes')
+        notes=request.form.get('notes')  # This line now captures the note from the dashboard
     )
     db.session.add(m)
     db.session.commit()
