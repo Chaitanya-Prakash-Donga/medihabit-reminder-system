@@ -9,15 +9,37 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
         body { background-color: #f8f9fa; font-family: 'Inter', sans-serif; color: #333; }
-        .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; }
+        .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; position: relative; }
         
-        /* Increased Header Sizes */
+        /* Top-Middle Pop-up Message */
+        .alert-custom {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            background-color: rgba(144, 238, 144, 0.9); /* Light transparent green */
+            color: black;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 30px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            animation: fadeInDown 0.5s ease;
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translate(-50%, -20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        /* Header Sizes */
         .dashboard-logo { 
-            width: 50px; /* Increased from 30px */ 
+            width: 50px; 
             height: auto; 
         }
         .dashboard-brand-text { 
-            font-size: 1.8rem; /* Increased font size */ 
+            font-size: 1.8rem; 
             font-weight: bold; 
         }
 
@@ -25,20 +47,28 @@
         .user-profile-clickable {
             display: flex;
             align-items: center;
-            gap: 15px; /* Increase gap for larger items */
-            text-decoration: none; /* Remove underline from link */
-            color: inherit; /* Use default text color */
+            gap: 12px;
+            text-decoration: none;
+            color: inherit;
             padding: 5px 10px;
-            border-radius: 8px;
-            transition: background-color 0.2s; /* Smooth hover transition */
+            border-radius: 50px;
+            transition: background-color 0.2s;
         }
         .user-profile-clickable:hover {
-            background-color: #f0f0f0; /* Hover effect */
+            background-color: #f0f0f0;
         }
 
-        /* Increased Profile Elements */
+        /* Profile Picture & Avatar */
+        .profile-pic-circle {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #1976d2;
+        }
+
         .avatar-circle { 
-            width: 45px; /* Increased from 35px */ 
+            width: 45px; 
             height: 45px; 
             background: #e3f2fd; 
             color: #1976d2; 
@@ -47,13 +77,16 @@
             align-items: center; 
             justify-content: center; 
             font-weight: bold; 
-            font-size: 1.2rem; /* Increased text inside avatar */
+            font-size: 1.2rem;
+            border: 2px solid #1976d2;
         }
+
         .username-text { 
-            font-size: 1.1rem; /* Increased username font size */ 
+            font-size: 1.1rem; 
             font-weight: bold; 
         }
         
+        /* Stats and Cards */
         .stat-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #efefef; height: 100%; }
         .stat-label { color: #888; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px; }
         .stat-value { font-size: 2rem; font-weight: 700; }
@@ -76,6 +109,16 @@
 <body>
 
 <nav class="navbar mb-5">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert-custom fade show" role="alert">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
     <div class="container d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center gap-3">
             <img src="/static/icon-192.png" class="dashboard-logo" alt="Logo">
@@ -84,7 +127,11 @@
 
         <div class="d-flex align-items-center gap-2">
             <a href="{{ url_for('edit_profile') }}" class="user-profile-clickable" title="Edit Profile">
-                <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
+                {% if session.get('profile_pic') %}
+                    <img src="{{ url_for('static', filename='uploads/' + session['profile_pic']) }}" class="profile-pic-circle" alt="Profile">
+                {% else %}
+                    <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
+                {% endif %}
                 <span class="username-text">{{ session['user_name'] }}</span>
             </a>
             <a href="/logout" class="btn btn-sm btn-outline-danger ms-2">Log out</a>
@@ -93,17 +140,6 @@
 </nav>
 
 <div class="container">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
     <div class="d-flex justify-content-between align-items-end mb-4">
         <div>
             <h1 class="h3 fw-bold mb-1">Dashboard</h1>
@@ -214,6 +250,16 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // Auto-hide the floating notification after 4 seconds
+    setTimeout(() => {
+        const alerts = document.querySelectorAll('.alert-custom');
+        alerts.forEach(alert => {
+            alert.style.transition = "opacity 0.5s ease";
+            alert.style.opacity = "0";
+            setTimeout(() => alert.remove(), 500);
+        });
+    }, 4000);
+
     const meds_js = {{ meds_js | tojson }};
     let sentThisMinute = new Set();
 
@@ -230,16 +276,12 @@
 
         meds_js.forEach(med => {
             if ((med.t1 === currentTime || (med.t2 && med.t2 === currentTime)) && !sentThisMinute.has(med.id)) {
-                
                 console.log(`Alert triggered for ${med.name} at ${currentTime} local time.`);
-                
                 try {
                     const speech = new SpeechSynthesisUtterance(`Reminder: Time to take ${med.name}`);
                     window.speechSynthesis.speak(speech);
                 } catch (e) {}
-
                 fetch(`/trigger-reminder/${med.id}`, { method: 'POST' });
-
                 sentThisMinute.add(med.id);
             }
         });
