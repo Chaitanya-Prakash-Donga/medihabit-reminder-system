@@ -1,6 +1,6 @@
 """
-MediHabit - app.py (Updated)
-Fixed: Duplicate email logic and enhanced HTML email templates.
+MediHabit - app.py
+Fixed: Edit Medication 404, Edit Profile logic, Duplicate Emails, and Styled HTML Templates.
 """
 import os
 import threading
@@ -19,6 +19,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
 
+# Set your domain here for email links (e.g., https://your-app.onrender.com)
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -29,6 +32,9 @@ if uri and uri.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///medihabit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# ── Styling Constants ────────────────────────────────────────────────────────
+EMAIL_BTN_STYLE = "color: #ffffff; background-color: #3498db; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;"
 
 # ── Enhanced HTML Email Logic ────────────────────────────────────────────────
 def send_smtp_email(to_email, subject, html_body):
@@ -44,7 +50,7 @@ def send_smtp_email(to_email, subject, html_body):
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
-        msg.attach(MIMEText(html_body, 'html')) # Changed to 'html'
+        msg.attach(MIMEText(html_body, 'html'))
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
@@ -118,21 +124,18 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # ── 1. ENHANCED WELCOME MAIL (HTML) ──
+            login_url = f"{BASE_URL}{url_for('login')}"
             welcome_html = f"""
             <html>
                 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                    <h2 style="color: #2c3e50;">Welcome to Your Health & Habit Companion!</h2>
+                    <h2 style="color: #2c3e50;">Welcome to MediHabit! 💊</h2>
                     <p>Hello <strong>{name}</strong>,</p>
-                    <p>Welcome to your personalized dashboard! We are excited to help you manage your wellness journey with precision. Your account is now fully configured to keep you on schedule and mindful of your health goals.</p>
-                    <h3>Getting Started:</h3>
-                    <ul>
-                        <li><strong>Add Your Schedule:</strong> Enter your medications, dosages, and specific times.</li>
-                        <li><strong>Enable Notifications:</strong> Ensure your email and browser alerts are active so you never miss a dose.</li>
-                        <li><strong>Track Progress:</strong> View your habit history to stay motivated and consistent.</li>
-                    </ul>
-                    <p>We are here to support your routine every step of the way. If you have any questions, simply reply to this email.</p>
-                    <p>Best regards,<br><strong>The MediHabit Team</strong></p>
+                    <p>Your personalized health dashboard is now ready. Stay consistent with your routines and never miss a dose.</p>
+                    <p><strong>Next steps:</strong> Add your medications and set your daily alert times.</p>
+                    <div style="margin: 25px 0; text-align: center;">
+                        <a href="{login_url}" style="{EMAIL_BTN_STYLE}">Login to Dashboard</a>
+                    </div>
+                    <p>Best regards,<br>The MediHabit Team</p>
                 </body>
             </html>
             """
@@ -179,6 +182,23 @@ def dashboard():
     return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
+# ── PROFILE EDIT LOGIC ───────────────────────────────────────────────────────
+@app.route('/profile/edit', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    user = User.query.get(session['user_id'])
+    if request.method == 'POST':
+        user.name = request.form.get('name')
+        new_pw = request.form.get('password')
+        if new_pw:
+            user.set_password(new_pw)
+        db.session.commit()
+        session['user_name'] = user.name
+        flash("Profile updated successfully!", "success")
+        return redirect(url_for('dashboard'))
+    return render_template('edit_profile.html', user=user)
+
+# ── MEDICATION CRUD (ADD/EDIT/DELETE) ───────────────────────────────────────
 @app.route('/medication/add', methods=['POST'])
 @login_required
 def add_medication():
@@ -189,12 +209,33 @@ def add_medication():
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
         recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes') # Ensure notes are saved
+        notes=request.form.get('notes')
     )
     db.session.add(m)
     db.session.commit()
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
+
+@app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def edit_medication(id):
+    med = Medication.query.get_or_404(id)
+    if med.user_id != session['user_id']:
+        flash("Access Denied.", "danger")
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        med.name = request.form.get('name')
+        med.dose = request.form.get('dose')
+        med.time1 = request.form.get('time1')
+        med.time2 = request.form.get('time2') or None
+        med.recipient_email = request.form.get('recipient_email')
+        med.notes = request.form.get('notes')
+        db.session.commit()
+        flash("Medication updated!", "success")
+        return redirect(url_for('dashboard'))
+    
+    return render_template('edit_medication.html', med=med)
 
 @app.route('/medication/delete/<int:id>')
 @login_required
@@ -203,18 +244,19 @@ def delete_medication(id):
     if med.user_id == session['user_id']:
         db.session.delete(med)
         db.session.commit()
+        flash("Medication deleted.", "info")
     return redirect(url_for('dashboard'))
 
-# ── UPDATED TRIGGER ROUTE WITH DUPLICATE PREVENTION ──────────────────────────
+# ── TRIGGER ROUTE WITH DUPLICATE PREVENTION ──────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # ── 1. PREVENT DUPLICATES (Database Lock) ──
-    # Check if an alert was sent for this medicine in the last 2 minutes
     cooldown_period = datetime.now() - timedelta(minutes=2)
+    med = Medication.query.get(med_id)
+    
     recent_log = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == Medication.query.get(med_id).name,
+        AlertLog.medication_name == med.name,
         AlertLog.sent_at >= cooldown_period
     ).first()
 
@@ -229,43 +271,34 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med: return
         
-        # ── 3. ENHANCED REMINDER MAIL (HTML WITH NOTE) ──
-        subject = f"Action Required: Medication Reminder for {med.name}"
-        
-        # Handle empty notes
+        # New Subject Line Format
+        subject = f"💊 Time for {med.name}"
         display_note = med.notes if med.notes else "No specific instructions provided."
+        login_url = f"{BASE_URL}{url_for('login')}"
         
         reminder_html = f"""
         <html>
-            <body style="font-family: Arial, sans-serif; color: #333;">
-                <h2 style="color: #d35400;">Health Alert: Medication Due Now</h2>
-                <p>This is a scheduled notification from your tracker to ensure you stay consistent with your regimen.</p>
-                <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #3498db;">
-                    <p><strong>Medication Details:</strong></p>
-                    <ul>
-                        <li><strong>Name:</strong> {med.name}</li>
-                        <li><strong>Dosage:</strong> {med.dose}</li>
-                    </ul>
-                    <p><strong>Important Note:</strong></p>
-                    <blockquote style="font-style: italic; color: #555;">
-                        "{display_note}"
-                    </blockquote>
+            <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+                <h2 style="color: #d35400; border-bottom: 2px solid #d35400; padding-bottom: 10px;">Medication Alert</h2>
+                <p>This is a reminder to take your scheduled dose.</p>
+                <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                    <p><strong>Medicine:</strong> {med.name}</p>
+                    <p><strong>Dosage:</strong> {med.dose}</p>
+                    <p><strong>Instructions:</strong> <em>{display_note}</em></p>
                 </div>
-                <h3>Next Steps:</h3>
-                <p>Please take your dose as soon as possible. Once completed, log in to your dashboard to mark this as "Taken." This helps maintain your accuracy for your health report.</p>
-                <p><em>Stay healthy and stay on track!</em></p>
+                <div style="margin: 25px 0; text-align: center;">
+                    <a href="{login_url}" style="{EMAIL_BTN_STYLE}">Open Dashboard & Mark Taken</a>
+                </div>
+                <p style="font-size: 0.9em; color: #777;">Stay healthy and stay consistent!</p>
             </body>
         </html>
         """
-        
         success = send_smtp_email(med.recipient_email, subject, reminder_html)
         
         log = AlertLog(
-            user_id=med.user_id, 
-            medication_name=med.name, 
+            user_id=med.user_id, medication_name=med.name, 
             status='sent' if success else 'failed', 
-            recipient=med.recipient_email,
-            sent_at=get_now_naive()
+            recipient=med.recipient_email, sent_at=get_now_naive()
         )
         db.session.add(log)
         db.session.commit()
@@ -284,6 +317,5 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    # ── 1. STOP DUPLICATES FROM RELOADER ──
-    # Disable the reloader to prevent the background threads from starting twice
+    # use_reloader=False prevents duplicate threads in debug mode
     app.run(debug=True, use_reloader=False)
