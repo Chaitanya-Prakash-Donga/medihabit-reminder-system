@@ -11,10 +11,10 @@
             --border: rgba(0,0,0,0.1);
             --text: #1a1a1a;
             --muted: #6b6b6b;
-            --accent: #1976d2;
+            --accent: #1a1a1a;
             --accent-fg: #fff;
             --danger: #d93025;
-            --radius: 12px;
+            --radius: 8px;
         }
 
         body {
@@ -30,7 +30,7 @@
 
         .container {
             width: 100%;
-            max-width: 450px;
+            max-width: 400px;
             padding: 20px;
         }
 
@@ -38,103 +38,57 @@
             background: var(--surface);
             padding: 30px;
             border-radius: var(--radius);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 6px var(--border);
             border: 1px solid var(--border);
         }
 
         h2 {
             margin-bottom: 24px;
-            font-size: 24px;
-            font-weight: 700;
+            font-size: 22px;
+            font-weight: 600;
             text-align: center;
         }
 
-        /* Profile Preview Styling */
-        .profile-preview-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-bottom: 25px;
-        }
-
-        .profile-pic-large {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 3px solid var(--accent);
-            margin-bottom: 10px;
-        }
-
-        .avatar-large {
-            width: 100px;
-            height: 100px;
-            background: #e3f2fd;
-            color: var(--accent);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 2.5rem;
-            border: 3px solid var(--accent);
-            margin-bottom: 10px;
-        }
-
         .form-group {
-            margin-bottom: 18px;
+            margin-bottom: 16px;
         }
 
         label {
             display: block;
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 500;
             margin-bottom: 6px;
             color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
         input {
             width: 100%;
-            padding: 12px;
+            padding: 10px;
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: var(--radius);
             font-size: 14px;
             outline: none;
-            transition: all 0.2s;
-            box-sizing: border-box;
+            transition: border-color 0.2s;
         }
 
         input:focus {
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
-        }
-
-        .file-input-wrapper {
-            background: #f8f9fa;
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px dashed var(--border);
         }
 
         .btn {
             width: 100%;
-            padding: 14px;
+            padding: 12px;
             border: none;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
+            transition: opacity 0.2s;
             margin-top: 10px;
             text-decoration: none;
             display: block;
             text-align: center;
-            box-sizing: border-box;
         }
-
-        .btn:active { transform: scale(0.98); }
 
         .btn-primary {
             background-color: var(--accent);
@@ -145,26 +99,18 @@
             background-color: transparent;
             color: var(--muted);
             border: 1px solid var(--border);
-            margin-top: 15px;
         }
 
         .alert {
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
+            padding: 10px;
+            border-radius: var(--radius);
+            margin-bottom: 16px;
+            font-size: 13px;
             text-align: center;
-            font-weight: 500;
         }
 
         .alert-danger { background: #fcebeb; color: #791f1f; }
         .alert-success { background: #eaf3de; color: #27500a; }
-        
-        .hint {
-            font-size: 11px;
-            color: var(--muted);
-            margin-top: 4px;
-        }
     </style>
 </head>
 <body>
@@ -181,58 +127,28 @@
             {% endif %}
         {% endwith %}
 
-        <div class="profile-preview-container">
-            {% if user.profile_pic %}
-                <img src="{{ url_for('static', filename='uploads/' + user.profile_pic) }}" class="profile-pic-large" id="output">
-            {% else %}
-                <div class="avatar-large">{{ user.name[0]|upper }}</div>
-            {% endif %}
-            <div class="hint">Profile Preview</div>
-        </div>
-
-        <form action="{{ url_for('edit_profile') }}" method="POST" enctype="multipart/form-data">
+        <form method="POST" action="{{ url_for('profile') }}">
             
-            <div class="form-group">
-                <label for="profile_pic">Change Profile Picture</label>
-                <div class="file-input-wrapper">
-                    <input type="file" id="profile_pic" name="profile_pic" accept="image/*" onchange="loadFile(event)">
-                </div>
-            </div>
-
             <div class="form-group">
                 <label for="name">Full Name</label>
                 <input type="text" id="name" name="name" value="{{ user.name }}" required>
             </div>
 
             <div class="form-group">
-                <label for="email">Email Address</label>
-                <input type="email" id="email" value="{{ user.email }}" disabled style="background: #f9f9f9; cursor: not-allowed; color: #aaa;">
-                <div class="hint">Email cannot be changed for security.</div>
+                <label for="email">Email Address (Cannot be changed)</label>
+                <input type="email" id="email" value="{{ user.email }}" disabled style="background: #f9f9f9; cursor: not-allowed;">
             </div>
 
             <div class="form-group">
-                <label for="password">New Password</label>
-                <input type="password" id="password" name="password" placeholder="Leave blank to keep current">
+                <label for="password">New Password (Leave blank to keep current)</label>
+                <input type="password" id="password" name="password" placeholder="••••••••">
             </div>
 
-            <button type="submit" class="btn btn-primary">Save Changes</button>
-            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Update Profile</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
         </form>
     </div>
 </div>
-
-<script>
-    // Live preview of the uploaded image
-    var loadFile = function(event) {
-        var output = document.getElementById('output');
-        if (output) {
-            output.src = URL.createObjectURL(event.target.files[0]);
-            output.onload = function() {
-                URL.revokeObjectURL(output.src) 
-            }
-        }
-    };
-</script>
 
 </body>
 </html>
