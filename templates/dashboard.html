@@ -43,7 +43,7 @@
         .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; }
         .btn-remove { border: 1px solid #ffcdd2; color: #d32f2f; }
 
-        /* Toast Animation */
+        /* Enhanced Global Toast Animation */
         @keyframes fadeInDown {
             from { opacity: 0; transform: translate(-50%, -20px); }
             to { opacity: 1; transform: translate(-50%, 0); }
@@ -52,11 +52,25 @@
 </head>
 <body>
 
-<div id="toast-container" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; pointer-events: none;">
+<div id="toast-container" style="position: fixed; top: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; pointer-events: none;">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="flash-toast" style="background: rgba(144, 238, 144, 0.9); color: black; padding: 12px 30px; border-radius: 50px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 10px; font-weight: 500; backdrop-filter: blur(5px); border: 1px solid rgba(0,0,0,0.05); animation: fadeInDown 0.5s ease; text-align: center; white-space: nowrap; pointer-events: auto;">
+          <div class="flash-toast" style="
+            background: rgba(40, 167, 69, 0.95); 
+            color: white; 
+            padding: 16px 40px; 
+            border-radius: 50px; 
+            box-shadow: 0 6px 18px rgba(0,0,0,0.2); 
+            margin-bottom: 10px; 
+            font-weight: 600; 
+            font-size: 1.1rem; 
+            backdrop-filter: blur(8px); 
+            border: 1px solid rgba(255,255,255,0.2); 
+            animation: fadeInDown 0.5s ease; 
+            text-align: center; 
+            white-space: nowrap; 
+            pointer-events: auto;">
             {{ message }}
           </div>
         {% endfor %}
@@ -66,9 +80,9 @@
 
 <nav class="navbar mb-5">
     <div class="container d-flex justify-content-between align-items-center">
-        <div class="d-flex align-items-center gap-2">
-            <img src="/static/icon-192.png" width="30" alt="Logo">
-            <span class="fw-bold fs-5">MediHabit</span>
+        <div class="d-flex align-items-center gap-3">
+            <img src="/static/icon-192.png" width="50" height="50" alt="Logo" style="object-fit: contain;">
+            <span class="fw-bold fs-4">MediHabit</span>
         </div>
         <div class="nav-user">
             <a href="/profile" class="profile-clickable">
@@ -194,7 +208,7 @@
             t.style.transform = "translateY(-10px)";
             setTimeout(() => t.remove(), 500);
         });
-    }, 3000);
+    }, 4000); // Increased duration slightly for readability
 
     // --- Medication Alert Logic ---
     const meds_js = {{ meds_js | tojson }};
