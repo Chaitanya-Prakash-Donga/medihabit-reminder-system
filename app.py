@@ -1,6 +1,6 @@
 """
-MediHabit - app.py (Final Updated)
-Enhanced: Subject line formatting, stylish HTML email templates, and added login buttons.
+MediHabit - app.py (Updated)
+Fixed: Duplicate email logic and enhanced HTML email templates.
 """
 import os
 import threading
@@ -19,9 +19,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
 
-# Standardizing URL to ensure mail links work correctly (replace with your real domain if deploying)
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
-
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -32,10 +29,6 @@ if uri and uri.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///medihabit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-
-# ── Email Styling Constants (Global for Consistency) ───────────────────────
-EMAIL_LINK_STYLE = "color: #fff; background-color: #3498db; padding: 10px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 15px;"
-EMAIL_BODY_STYLE = "font-family: Arial, sans-serif; line-height: 1.6; color: #333; padding: 20px;"
 
 # ── Enhanced HTML Email Logic ────────────────────────────────────────────────
 def send_smtp_email(to_email, subject, html_body):
@@ -51,7 +44,7 @@ def send_smtp_email(to_email, subject, html_body):
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
-        msg.attach(MIMEText(html_body, 'html'))
+        msg.attach(MIMEText(html_body, 'html')) # Changed to 'html'
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
@@ -125,32 +118,19 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # ── ENHANCED WELCOME MAIL (HTML with Login Link) ──
+            # ── 1. ENHANCED WELCOME MAIL (HTML) ──
             welcome_html = f"""
             <html>
-                <body style="{EMAIL_BODY_STYLE}">
-                    <div style="background-color: #2c3e50; padding: 10px; border-radius: 5px; color: #fff; text-align: center;">
-                        <h1>Welcome to MediHabit! 💊</h1>
-                    </div>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                    <h2 style="color: #2c3e50;">Welcome to Your Health & Habit Companion!</h2>
                     <p>Hello <strong>{name}</strong>,</p>
-                    <p>We are thrilled to welcome you to your new Health & Habit Companion! You've taken the first step toward better medication adherence and a healthier routine.</p>
-                    <p>Your account is fully configured to help you stay on schedule. You can now access your dashboard to manage your wellness journey with precision.</p>
-                    
-                    <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; border-left: 5px solid #2c3e50; margin: 20px 0;">
-                        <h3>How to get started:</h3>
-                        <ul style="padding-left: 20px;">
-                            <li><strong>Add Medications:</strong> Create your schedule with dosages and specific times.</li>
-                            <li><strong>Set Up Notifications:</strong> Receive automated email reminders like this one.</li>
-                            <li><strong>View Progress:</strong> Monitor your consistency over time.</li>
-                        </ul>
-                    </div>
-
-                    <p>Please click the button below to log in and start configuring your reminders:</p>
-                    
-                    <div style="text-align: center;">
-                        <a href="{BASE_URL + url_for('login')}" style="{EMAIL_LINK_STYLE}">Access Your Dashboard</a>
-                    </div>
-                    
+                    <p>Welcome to your personalized dashboard! We are excited to help you manage your wellness journey with precision. Your account is now fully configured to keep you on schedule and mindful of your health goals.</p>
+                    <h3>Getting Started:</h3>
+                    <ul>
+                        <li><strong>Add Your Schedule:</strong> Enter your medications, dosages, and specific times.</li>
+                        <li><strong>Enable Notifications:</strong> Ensure your email and browser alerts are active so you never miss a dose.</li>
+                        <li><strong>Track Progress:</strong> View your habit history to stay motivated and consistent.</li>
+                    </ul>
                     <p>We are here to support your routine every step of the way. If you have any questions, simply reply to this email.</p>
                     <p>Best regards,<br><strong>The MediHabit Team</strong></p>
                 </body>
@@ -209,7 +189,7 @@ def add_medication():
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
         recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes')
+        notes=request.form.get('notes') # Ensure notes are saved
     )
     db.session.add(m)
     db.session.commit()
@@ -225,17 +205,16 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── Trigger Route with Duplicate Prevention ──────────────────────────
+# ── UPDATED TRIGGER ROUTE WITH DUPLICATE PREVENTION ──────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # Cooldown check to prevent duplicates
+    # ── 1. PREVENT DUPLICATES (Database Lock) ──
+    # Check if an alert was sent for this medicine in the last 2 minutes
     cooldown_period = datetime.now() - timedelta(minutes=2)
-    med_name = Medication.query.get(med_id).name
-    
     recent_log = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == med_name,
+        AlertLog.medication_name == Medication.query.get(med_id).name,
         AlertLog.sent_at >= cooldown_period
     ).first()
 
@@ -250,43 +229,31 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med: return
         
-        # ── UPDATED SUBJECT LINE (FORMATTED PER REQUEST) ──
-        # New format: "💊 Time for Dolo"
-        subject = f"💊 Time for {med.name}"
+        # ── 3. ENHANCED REMINDER MAIL (HTML WITH NOTE) ──
+        subject = f"Action Required: Medication Reminder for {med.name}"
         
         # Handle empty notes
         display_note = med.notes if med.notes else "No specific instructions provided."
         
-        # ── ENHANCED REMINDER MAIL (HTML with Login Link and Styled Notes) ──
         reminder_html = f"""
         <html>
-            <body style="{EMAIL_BODY_STYLE}">
-                <div style="background-color: #d35400; padding: 10px; border-radius: 5px; color: #fff; text-align: center;">
-                    <h1>Health Alert: Medication Due Now</h1>
-                </div>
-                <p>This is a scheduled notification from your tracker to ensure you stay consistent with your medical regimen.</p>
-                
-                <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 5px solid #d35400; margin: 20px 0;">
-                    <p style="margin-top: 0;"><strong>Medication Details:</strong></p>
-                    <ul style="padding-left: 20px;">
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <h2 style="color: #d35400;">Health Alert: Medication Due Now</h2>
+                <p>This is a scheduled notification from your tracker to ensure you stay consistent with your regimen.</p>
+                <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #3498db;">
+                    <p><strong>Medication Details:</strong></p>
+                    <ul>
                         <li><strong>Name:</strong> {med.name}</li>
                         <li><strong>Dosage:</strong> {med.dose}</li>
                     </ul>
                     <p><strong>Important Note:</strong></p>
-                    <blockquote style="font-style: italic; color: #555; background-color: #fff; padding: 10px; border-radius: 3px; margin: 0;">
+                    <blockquote style="font-style: italic; color: #555;">
                         "{display_note}"
                     </blockquote>
                 </div>
-
                 <h3>Next Steps:</h3>
-                <p>Please take your dose as soon as possible. Once completed, we encourage you to log in to your dashboard to mark this as "Taken." This helps maintain accurate logs for your health report.</p>
-                
-                <div style="text-align: center;">
-                    <a href="{BASE_URL + url_for('login')}" style="{EMAIL_LINK_STYLE}">Mark Dose as Taken</a>
-                </div>
-                
-                <p style="margin-top: 20px;"><em>Stay healthy and stay on track!</em></p>
-                <p>Best regards,<br><strong>The MediHabit Team</strong></p>
+                <p>Please take your dose as soon as possible. Once completed, log in to your dashboard to mark this as "Taken." This helps maintain your accuracy for your health report.</p>
+                <p><em>Stay healthy and stay on track!</em></p>
             </body>
         </html>
         """
@@ -317,5 +284,6 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    # Keep the reloader disabled to maintain duplicate prevention logic
+    # ── 1. STOP DUPLICATES FROM RELOADER ──
+    # Disable the reloader to prevent the background threads from starting twice
     app.run(debug=True, use_reloader=False)
