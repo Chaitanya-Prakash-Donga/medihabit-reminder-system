@@ -19,10 +19,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-# Using SECURITY_KEY or SECRET_KEY from environment
 app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
 
-# Helper: Get current time as a 'naive' object for DB consistency
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -39,7 +37,7 @@ db = SQLAlchemy(app)
 # ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
-    sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
+    sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
         print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
@@ -126,7 +124,6 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # Welcome Mail
             welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your medicine reminders are now ready."
             threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
             
@@ -160,11 +157,7 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    
-    # Critical: Include 'id' so JavaScript can call the trigger route
     meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
-
-    # Show logs for today (based on server date)
     today_date = get_now_naive().date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
@@ -176,6 +169,48 @@ def dashboard():
                            meds_js=meds_js, 
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
+
+# ── NEW: EDIT MEDICATION ROUTE ──────────────────────────────────────────────
+@app.route('/medication/edit/<int:medication_id>', methods=['GET', 'POST'])
+@login_required
+def edit_medication(medication_id):
+    med = Medication.query.get_or_404(medication_id)
+    
+    # Security check: ensure the med belongs to the logged in user
+    if med.user_id != session['user_id']:
+        flash("Unauthorized access.", "danger")
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        med.name = request.form.get('name')
+        med.dose = request.form.get('dose')
+        med.time1 = request.form.get('time1')
+        med.time2 = request.form.get('time2') or None
+        med.recipient_email = request.form.get('recipient_email')
+        
+        db.session.commit()
+        flash(f'"{med.name}" updated successfully!', "success")
+        return redirect(url_for('dashboard'))
+
+    return render_template('edit_medication.html', medication=med)
+
+# ── NEW: EDIT PROFILE ROUTE ──────────────────────────────────────────────────
+@app.route('/edit_profile', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        new_name = request.form.get('name')
+        if new_name:
+            user.name = new_name
+            db.session.commit()
+            # Update the session so the dashboard shows the new name immediately
+            session['user_name'] = user.name
+            flash("Profile updated!", "success")
+            return redirect(url_for('dashboard'))
+
+    return render_template('edit_profile.html', user=user)
 
 @app.route('/medication/add', methods=['POST'])
 @login_required
