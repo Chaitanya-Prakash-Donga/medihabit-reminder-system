@@ -1,13 +1,11 @@
 """
-MediHabit - app.py
-Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
-Trigger-based reminders for universal timezone support.
+MediHabit - app.py (Updated)
+Fixed: Duplicate email logic and enhanced HTML email templates.
 """
 import os
 import threading
 import smtplib
-import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -19,10 +17,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-# Using SECURITY_KEY or SECRET_KEY from environment
-app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
+app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
 
-# Helper: Get current time as a 'naive' object for DB consistency
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -32,14 +28,12 @@ if uri and uri.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///medihabit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle": 280}
-
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
-def send_smtp_email(to_email, subject, body):
+# ── Enhanced HTML Email Logic ────────────────────────────────────────────────
+def send_smtp_email(to_email, subject, html_body):
     sender_email = os.environ.get('GMAIL_USER')
-    sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
+    sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
         print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
@@ -50,7 +44,7 @@ def send_smtp_email(to_email, subject, body):
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html')) # Changed to 'html'
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
@@ -71,7 +65,6 @@ class User(db.Model):
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
-
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
 
@@ -80,7 +73,6 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
-    frequency = db.Column(db.String(50))
     time1 = db.Column(db.String(5))   
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
@@ -126,9 +118,25 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # Welcome Mail
-            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your medicine reminders are now ready."
-            threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
+            # ── 1. ENHANCED WELCOME MAIL (HTML) ──
+            welcome_html = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                    <h2 style="color: #2c3e50;">Welcome to Your Health & Habit Companion!</h2>
+                    <p>Hello <strong>{name}</strong>,</p>
+                    <p>Welcome to your personalized dashboard! We are excited to help you manage your wellness journey with precision. Your account is now fully configured to keep you on schedule and mindful of your health goals.</p>
+                    <h3>Getting Started:</h3>
+                    <ul>
+                        <li><strong>Add Your Schedule:</strong> Enter your medications, dosages, and specific times.</li>
+                        <li><strong>Enable Notifications:</strong> Ensure your email and browser alerts are active so you never miss a dose.</li>
+                        <li><strong>Track Progress:</strong> View your habit history to stay motivated and consistent.</li>
+                    </ul>
+                    <p>We are here to support your routine every step of the way. If you have any questions, simply reply to this email.</p>
+                    <p>Best regards,<br><strong>The MediHabit Team</strong></p>
+                </body>
+            </html>
+            """
+            threading.Thread(target=send_smtp_email, args=(email, "Welcome to MediHabit! 💊", welcome_html)).start()
             
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
@@ -160,21 +168,15 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
-    
-    # Critical: Include 'id' so JavaScript can call the trigger route
     meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
-
-    # Show logs for today (based on server date)
+    
     today_date = get_now_naive().date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
         db.func.date(AlertLog.sent_at) == today_date
     ).order_by(AlertLog.sent_at.desc()).all()
     
-    return render_template('dashboard.html', 
-                           meds=meds, 
-                           meds_js=meds_js, 
-                           logs=logs, 
+    return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
 @app.route('/medication/add', methods=['POST'])
@@ -186,7 +188,8 @@ def add_medication():
         dose=request.form.get('dose'),
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
-        recipient_email=request.form.get('recipient_email')
+        recipient_email=request.form.get('recipient_email'),
+        notes=request.form.get('notes') # Ensure notes are saved
     )
     db.session.add(m)
     db.session.commit()
@@ -202,11 +205,22 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
+# ── UPDATED TRIGGER ROUTE WITH DUPLICATE PREVENTION ──────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    """Called by the Browser JS when the local clock matches med time."""
+    # ── 1. PREVENT DUPLICATES (Database Lock) ──
+    # Check if an alert was sent for this medicine in the last 2 minutes
+    cooldown_period = datetime.now() - timedelta(minutes=2)
+    recent_log = AlertLog.query.filter(
+        AlertLog.user_id == session['user_id'],
+        AlertLog.medication_name == Medication.query.get(med_id).name,
+        AlertLog.sent_at >= cooldown_period
+    ).first()
+
+    if recent_log:
+        return jsonify({"status": "already_sent_recently"}), 200
+
     threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
     return jsonify({"status": "received"}), 200
 
@@ -215,9 +229,36 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med: return
         
-        subject = f"💊 Time for {med.name}"
-        body = f"Reminder: It is time to take {med.name} ({med.dose})."
-        success = send_smtp_email(med.recipient_email, subject, body)
+        # ── 3. ENHANCED REMINDER MAIL (HTML WITH NOTE) ──
+        subject = f"Action Required: Medication Reminder for {med.name}"
+        
+        # Handle empty notes
+        display_note = med.notes if med.notes else "No specific instructions provided."
+        
+        reminder_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <h2 style="color: #d35400;">Health Alert: Medication Due Now</h2>
+                <p>This is a scheduled notification from your tracker to ensure you stay consistent with your regimen.</p>
+                <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #3498db;">
+                    <p><strong>Medication Details:</strong></p>
+                    <ul>
+                        <li><strong>Name:</strong> {med.name}</li>
+                        <li><strong>Dosage:</strong> {med.dose}</li>
+                    </ul>
+                    <p><strong>Important Note:</strong></p>
+                    <blockquote style="font-style: italic; color: #555;">
+                        "{display_note}"
+                    </blockquote>
+                </div>
+                <h3>Next Steps:</h3>
+                <p>Please take your dose as soon as possible. Once completed, log in to your dashboard to mark this as "Taken." This helps maintain your accuracy for your health report.</p>
+                <p><em>Stay healthy and stay on track!</em></p>
+            </body>
+        </html>
+        """
+        
+        success = send_smtp_email(med.recipient_email, subject, reminder_html)
         
         log = AlertLog(
             user_id=med.user_id, 
@@ -243,4 +284,6 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # ── 1. STOP DUPLICATES FROM RELOADER ──
+    # Disable the reloader to prevent the background threads from starting twice
+    app.run(debug=True, use_reloader=False)
