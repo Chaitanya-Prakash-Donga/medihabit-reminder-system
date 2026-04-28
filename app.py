@@ -6,7 +6,6 @@ Trigger-based reminders for universal timezone support.
 import os
 import threading
 import smtplib
-import pytz
 from datetime import datetime
 from functools import wraps
 from email.mime.text import MIMEText
@@ -19,8 +18,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
+# Using SECURITY_KEY or SECRET_KEY from environment
 app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
 
+# Helper: Get current time as a 'naive' object for DB consistency
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -37,7 +38,7 @@ db = SQLAlchemy(app)
 # ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
-    sender_password = os.environ.get('GMAIL_PASSWORD')
+    sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
     
     if not sender_email or not sender_password:
         print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
@@ -170,16 +171,14 @@ def dashboard():
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── NEW: EDIT MEDICATION ROUTE ──────────────────────────────────────────────
+# ── FIXED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
 @app.route('/medication/edit/<int:medication_id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(medication_id):
     med = Medication.query.get_or_404(medication_id)
     
-    # Security check: ensure the med belongs to the logged in user
     if med.user_id != session['user_id']:
-        flash("Unauthorized access.", "danger")
-        return redirect(url_for('dashboard'))
+        return "Unauthorized", 403
 
     if request.method == 'POST':
         med.name = request.form.get('name')
@@ -189,26 +188,23 @@ def edit_medication(medication_id):
         med.recipient_email = request.form.get('recipient_email')
         
         db.session.commit()
-        flash(f'"{med.name}" updated successfully!', "success")
+        flash("Medication updated!", "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', medication=med)
 
-# ── NEW: EDIT PROFILE ROUTE ──────────────────────────────────────────────────
+# ── FIXED: EDIT PROFILE ROUTE ────────────────────────────────────────────────
 @app.route('/edit_profile', methods=['GET', 'POST'])
 @login_required
 def edit_profile():
     user = User.query.get(session['user_id'])
     
     if request.method == 'POST':
-        new_name = request.form.get('name')
-        if new_name:
-            user.name = new_name
-            db.session.commit()
-            # Update the session so the dashboard shows the new name immediately
-            session['user_name'] = user.name
-            flash("Profile updated!", "success")
-            return redirect(url_for('dashboard'))
+        user.name = request.form.get('name')
+        db.session.commit()
+        session['user_name'] = user.name
+        flash("Profile updated!", "success")
+        return redirect(url_for('dashboard'))
 
     return render_template('edit_profile.html', user=user)
 
