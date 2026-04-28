@@ -1,12 +1,12 @@
 """
 MediHabit - app.py
 Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
-Trigger-based reminders for universal timezone support.
+Trigger-based reminders with duplicate prevention and fixed Profile/Edit routes.
 """
 import os
 import threading
 import smtplib
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -83,7 +83,6 @@ class Medication(db.Model):
     recipient_email = db.Column(db.String(120))
     notes = db.Column(db.String(300))
     active = db.Column(db.Boolean, default=True)
-    # Added to match your HTML checkbox
     email_enabled = db.Column(db.Boolean, default=True)
 
 class AlertLog(db.Model):
@@ -115,16 +114,13 @@ def register():
             name = request.form.get('name')
             email = request.form.get('email').strip().lower()
             pw = request.form.get('password')
-            
             if User.query.filter_by(email=email).first():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
-            
             user = User(name=name, email=email)
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
-            
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
@@ -167,12 +163,11 @@ def dashboard():
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── FIXED: EDIT MEDICATION ROUTE (Matches your HTML 'med' variable & 'id' param) ──
+# ── FIXED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
-    
     if med.user_id != session['user_id']:
         flash("Unauthorized access.", "danger")
         return redirect(url_for('dashboard'))
@@ -185,35 +180,30 @@ def edit_medication(id):
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
         med.email_enabled = True if request.form.get('email_enabled') else False
-        
         db.session.commit()
         flash(f'"{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── FIXED: EDIT PROFILE ROUTE (Matches your HTML 'profile' endpoint) ──────────
-@app.route('/profile', methods=['GET', 'POST'])
+# ── FIXED: PROFILE ROUTE (Matches your HTML exactly) ─────────────────────────
+@app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
-    user = User.query.get(session['user_id'])
-    
+    user_obj = User.query.get(session['user_id'])
     if request.method == 'POST':
         new_name = request.form.get('name')
         new_password = request.form.get('password')
-        
         if new_name:
-            user.name = new_name
-            session['user_name'] = user.name
-            
+            user_obj.name = new_name
+            session['user_name'] = user_obj.name
         if new_password and len(new_password) > 0:
-            user.set_password(new_password)
-            
+            user_obj.set_password(new_password)
         db.session.commit()
         flash("Profile updated successfully!", "success")
         return redirect(url_for('dashboard'))
 
-    return render_template('edit_profile.html', user=user)
+    return render_template('edit_profile.html', user=user_obj)
 
 @app.route('/medication/add', methods=['POST'])
 @login_required
@@ -241,22 +231,29 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
+# ── TRIGGER ROUTE (Includes logic to prevent 2 emails) ───────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
-    return jsonify({"status": "received"}), 200
+    # PREVENT DUPLICATES: Check if an email was sent for this med in the last 2 minutes
+    already_sent = AlertLog.query.filter(
+        AlertLog.user_id == session['user_id'],
+        AlertLog.medication_name == Medication.query.get(med_id).name,
+        AlertLog.sent_at >= datetime.now() - timedelta(minutes=2)
+    ).first()
+
+    if not already_sent:
+        threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
+        return jsonify({"status": "received"}), 200
+    
+    return jsonify({"status": "duplicate_prevented"}), 200
 
 def send_reminder_task(med_id):
     with app.app_context():
         med = Medication.query.get(med_id)
-        if not med: return
-        
-        # Only send if email alerts are enabled
-        if hasattr(med, 'email_enabled') and not med.email_enabled:
+        if not med or (hasattr(med, 'email_enabled') and not med.email_enabled):
             return
-
+        
         subject = f"💊 Time for {med.name}"
         body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
