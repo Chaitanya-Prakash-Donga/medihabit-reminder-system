@@ -271,7 +271,6 @@ def send_reminder_task(med_id):
         med = Medication.query.get(med_id)
         if not med: return
         
-        # New Subject Line Format
         subject = f"💊 Time for {med.name}"
         display_note = med.notes if med.notes else "No specific instructions provided."
         login_url = f"{BASE_URL}{url_for('login')}"
@@ -317,5 +316,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    # use_reloader=False prevents duplicate threads in debug mode
     app.run(debug=True, use_reloader=False)
