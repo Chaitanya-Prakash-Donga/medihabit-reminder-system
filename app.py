@@ -168,11 +168,13 @@ def dashboard():
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
+    
     if med.user_id != session['user_id']:
         flash("Unauthorized access.", "danger")
         return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
+        # Update fields
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
         med.time1 = request.form.get('time1')
@@ -180,27 +182,36 @@ def edit_medication(id):
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
         med.email_enabled = True if request.form.get('email_enabled') else False
+        
         db.session.commit()
-        flash(f'"{med.name}" updated successfully!', "success")
+        
+        # Success message pop-up
+        flash(f'Medication "{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── FIXED: PROFILE ROUTE (Matches your HTML exactly) ─────────────────────────
+# ── FIXED: PROFILE ROUTE (Fixes the 404 Error) ──────────────────────────────
 @app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
     user_obj = User.query.get(session['user_id'])
+    
     if request.method == 'POST':
         new_name = request.form.get('name')
         new_password = request.form.get('password')
+        
         if new_name:
             user_obj.name = new_name
-            session['user_name'] = user_obj.name
+            session['user_name'] = user_obj.name # Update session header
+            
         if new_password and len(new_password) > 0:
             user_obj.set_password(new_password)
+            
         db.session.commit()
-        flash("Profile updated successfully!", "success")
+        
+        # Success message pop-up
+        flash(f'Profile for "{user_obj.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_profile.html', user=user_obj)
