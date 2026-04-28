@@ -1,7 +1,3 @@
-"""
-MediHabit - app.py
-Fixed: Edit Medication 404, Edit Profile logic, Duplicate Emails, and Styled HTML Templates.
-"""
 import os
 import threading
 import smtplib
@@ -14,16 +10,28 @@ from flask import (Flask, render_template, request,
                    redirect, url_for, session, flash, send_from_directory, jsonify)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
 
-# Set your domain here for email links (e.g., https://your-app.onrender.com)
+# Profile Picture Upload Config
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Ensure upload directory exists
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
 
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 uri = os.environ.get('DATABASE_URL')
 if uri and uri.startswith("postgres://"):
@@ -52,6 +60,7 @@ def send_smtp_email(to_email, subject, html_body):
         msg['Subject'] = subject
         msg.attach(MIMEText(html_body, 'html'))
 
+        # Use port 465 for SSL
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
             server.send_message(msg)
@@ -66,6 +75,7 @@ class User(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
+    profile_pic = db.Column(db.String(200), nullable=True) # Added for Profile Picture
     created_at = db.Column(db.DateTime, default=get_now_naive)
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
@@ -124,17 +134,12 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            login_url = f"{BASE_URL}{url_for('login')}"
             welcome_html = f"""
             <html>
                 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                     <h2 style="color: #2c3e50;">Welcome to MediHabit! 💊</h2>
                     <p>Hello <strong>{name}</strong>,</p>
-                    <p>Your personalized health dashboard is now ready. Stay consistent with your routines and never miss a dose.</p>
-                    <p><strong>Next steps:</strong> Add your medications and set your daily alert times.</p>
-                    <div style="margin: 25px 0; text-align: center;">
-                        <a href="{login_url}" style="{EMAIL_BTN_STYLE}">Login to Dashboard</a>
-                    </div>
+                    <p>Your account is ready. Stay consistent and never miss a dose.</p>
                     <p>Best regards,<br>The MediHabit Team</p>
                 </body>
             </html>
@@ -155,7 +160,12 @@ def login():
         pw = request.form.get('password')
         user = User.query.filter_by(email=email).first()
         if user and user.check_password(pw):
-            session.update({'user_id': user.id, 'user_name': user.name, 'user_email': user.email})
+            session.update({
+                'user_id': user.id, 
+                'user_name': user.name, 
+                'user_email': user.email,
+                'profile_pic': user.profile_pic # Add to session
+            })
             flash(f"Welcome back, {user.name}!", "success")
             return redirect(url_for('dashboard'))
         flash("Invalid email or password.", "danger")
@@ -182,16 +192,27 @@ def dashboard():
     return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── PROFILE EDIT LOGIC ───────────────────────────────────────────────────────
+# ── PROFILE EDIT LOGIC WITH IMAGE UPLOAD ──────────────────────────────────────
 @app.route('/profile/edit', methods=['GET', 'POST'])
 @login_required
 def edit_profile():
     user = User.query.get(session['user_id'])
     if request.method == 'POST':
         user.name = request.form.get('name')
+        
+        # Handle Profile Picture Upload
+        if 'profile_pic' in request.files:
+            file = request.files['profile_pic']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(f"user_{user.id}_{file.filename}")
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                user.profile_pic = filename
+                session['profile_pic'] = filename # Update session
+
         new_pw = request.form.get('password')
         if new_pw:
             user.set_password(new_pw)
+            
         db.session.commit()
         session['user_name'] = user.name
         flash("Profile updated successfully!", "success")
@@ -247,11 +268,12 @@ def delete_medication(id):
         flash("Medication deleted.", "info")
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER ROUTE WITH DUPLICATE PREVENTION ──────────────────────────
+# ── TRIGGER ROUTE ────────────────────────────────────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    cooldown_period = datetime.now() - timedelta(minutes=2)
+    # Short cooldown to prevent double-sends within same minute
+    cooldown_period = datetime.now() - timedelta(seconds=55)
     med = Medication.query.get(med_id)
     
     recent_log = AlertLog.query.filter(
@@ -268,36 +290,35 @@ def trigger_reminder(med_id):
 
 def send_reminder_task(med_id):
     with app.app_context():
+        # Re-fetch med inside thread context
         med = Medication.query.get(med_id)
         if not med: return
         
         subject = f"💊 Time for {med.name}"
         display_note = med.notes if med.notes else "No specific instructions provided."
-        login_url = f"{BASE_URL}{url_for('login')}"
         
         reminder_html = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-                <h2 style="color: #d35400; border-bottom: 2px solid #d35400; padding-bottom: 10px;">Medication Alert</h2>
-                <p>This is a reminder to take your scheduled dose.</p>
-                <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                <h2 style="color: #d35400;">Medication Alert</h2>
+                <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px;">
                     <p><strong>Medicine:</strong> {med.name}</p>
                     <p><strong>Dosage:</strong> {med.dose}</p>
-                    <p><strong>Instructions:</strong> <em>{display_note}</em></p>
+                    <p><strong>Instructions:</strong> {display_note}</p>
                 </div>
-                <div style="margin: 25px 0; text-align: center;">
-                    <a href="{login_url}" style="{EMAIL_BTN_STYLE}">Open Dashboard & Mark Taken</a>
-                </div>
-                <p style="font-size: 0.9em; color: #777;">Stay healthy and stay consistent!</p>
+                <p>Stay healthy!</p>
             </body>
         </html>
         """
         success = send_smtp_email(med.recipient_email, subject, reminder_html)
         
+        # Log the attempt
         log = AlertLog(
-            user_id=med.user_id, medication_name=med.name, 
+            user_id=med.user_id, 
+            medication_name=med.name, 
             status='sent' if success else 'failed', 
-            recipient=med.recipient_email, sent_at=get_now_naive()
+            recipient=med.recipient_email, 
+            sent_at=get_now_naive()
         )
         db.session.add(log)
         db.session.commit()
