@@ -168,13 +168,11 @@ def dashboard():
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
-    
     if med.user_id != session['user_id']:
         flash("Unauthorized access.", "danger")
         return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
-        # Update fields
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
         med.time1 = request.form.get('time1')
@@ -184,33 +182,27 @@ def edit_medication(id):
         med.email_enabled = True if request.form.get('email_enabled') else False
         
         db.session.commit()
-        
-        # Success message pop-up
+        # Dynamic pop-up message
         flash(f'Medication "{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── FIXED: PROFILE ROUTE (Fixes the 404 Error) ──────────────────────────────
+# ── FIXED: PROFILE ROUTE ─────────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
     user_obj = User.query.get(session['user_id'])
-    
     if request.method == 'POST':
         new_name = request.form.get('name')
         new_password = request.form.get('password')
-        
         if new_name:
             user_obj.name = new_name
-            session['user_name'] = user_obj.name # Update session header
-            
+            session['user_name'] = user_obj.name
         if new_password and len(new_password) > 0:
             user_obj.set_password(new_password)
-            
-        db.session.commit()
         
-        # Success message pop-up
+        db.session.commit()
         flash(f'Profile for "{user_obj.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
@@ -242,11 +234,11 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER ROUTE (Includes logic to prevent 2 emails) ───────────────────────
+# ── TRIGGER ROUTE (Preserved Email/Voice Logic) ──────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # PREVENT DUPLICATES: Check if an email was sent for this med in the last 2 minutes
+    # PREVENT DUPLICATES: Check last 2 minutes
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
         AlertLog.medication_name == Medication.query.get(med_id).name,
