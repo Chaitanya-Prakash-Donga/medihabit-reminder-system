@@ -1,12 +1,12 @@
 """
 MediHabit - app.py
 Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
-Trigger-based reminders with duplicate prevention and fixed Edit routes.
+Trigger-based reminders for universal timezone support.
 """
 import os
 import threading
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import wraps
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -33,7 +33,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic ──────────────────────────────────────────────────
+# ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
@@ -68,6 +68,7 @@ class User(db.Model):
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
+
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
 
@@ -76,11 +77,14 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
+    frequency = db.Column(db.String(50))
     time1 = db.Column(db.String(5))   
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
     notes = db.Column(db.String(300))
     active = db.Column(db.Boolean, default=True)
+    # Added to match your HTML checkbox
+    email_enabled = db.Column(db.Boolean, default=True)
 
 class AlertLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -111,14 +115,17 @@ def register():
             name = request.form.get('name')
             email = request.form.get('email').strip().lower()
             pw = request.form.get('password')
+            
             if User.query.filter_by(email=email).first():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
+            
             user = User(name=name, email=email)
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
-            flash("Account created!", "success")
+            
+            flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
             db.session.rollback()
@@ -134,8 +141,13 @@ def login():
         if user and user.check_password(pw):
             session.update({'user_id': user.id, 'user_name': user.name, 'user_email': user.email})
             return redirect(url_for('dashboard'))
-        flash("Invalid login.", "danger")
+        flash("Invalid email or password.", "danger")
     return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 @app.route('/dashboard')
 @login_required
@@ -143,16 +155,27 @@ def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
     meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
-    logs = AlertLog.query.filter_by(user_id=uid).order_by(AlertLog.sent_at.desc()).limit(10).all()
-    return render_template('dashboard.html', meds=meds, meds_js=meds_js, logs=logs, today_date=datetime.now().strftime('%A, %d %B'))
+    today_date = get_now_naive().date()
+    logs = AlertLog.query.filter(
+        AlertLog.user_id == uid, 
+        db.func.date(AlertLog.sent_at) == today_date
+    ).order_by(AlertLog.sent_at.desc()).all()
+    
+    return render_template('dashboard.html', 
+                           meds=meds, 
+                           meds_js=meds_js, 
+                           logs=logs, 
+                           today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── FIXED: EDIT MEDICATION (Matches your HTML variables) ─────────────────────
+# ── FIXED: EDIT MEDICATION ROUTE (Matches your HTML 'med' variable & 'id' param) ──
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
+    
     if med.user_id != session['user_id']:
-        return "Unauthorized", 403
+        flash("Unauthorized access.", "danger")
+        return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
         med.name = request.form.get('name')
@@ -161,26 +184,33 @@ def edit_medication(id):
         med.time2 = request.form.get('time2') or None
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
+        med.email_enabled = True if request.form.get('email_enabled') else False
         
         db.session.commit()
-        flash("Medication updated!", "success")
+        flash(f'"{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── FIXED: PROFILE ROUTE (Matches your HTML action="{{ url_for('profile') }}") ──
+# ── FIXED: EDIT PROFILE ROUTE (Matches your HTML 'profile' endpoint) ──────────
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
     user = User.query.get(session['user_id'])
+    
     if request.method == 'POST':
-        user.name = request.form.get('name')
-        new_pw = request.form.get('password')
-        if new_pw:
-            user.set_password(new_pw)
+        new_name = request.form.get('name')
+        new_password = request.form.get('password')
+        
+        if new_name:
+            user.name = new_name
+            session['user_name'] = user.name
+            
+        if new_password and len(new_password) > 0:
+            user.set_password(new_password)
+            
         db.session.commit()
-        session['user_name'] = user.name
-        flash("Profile updated!", "success")
+        flash("Profile updated successfully!", "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_profile.html', user=user)
@@ -194,10 +224,12 @@ def add_medication():
         dose=request.form.get('dose'),
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
-        recipient_email=request.form.get('recipient_email')
+        recipient_email=request.form.get('recipient_email'),
+        notes=request.form.get('notes')
     )
     db.session.add(m)
     db.session.commit()
+    flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
 @app.route('/medication/delete/<int:id>')
@@ -209,40 +241,46 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER ROUTE (With Duplicate Email Prevention) ──────────────────────────
+# ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # PREVENT DUPLICATES: Check if this medicine sent an email in the last 2 minutes
-    med_name = Medication.query.get(med_id).name
-    already_sent = AlertLog.query.filter(
-        AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == med_name,
-        AlertLog.sent_at >= datetime.now() - timedelta(minutes=2)
-    ).first()
-
-    if not already_sent:
-        threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
-        return jsonify({"status": "sent"}), 200
-    
-    return jsonify({"status": "ignored_duplicate"}), 200
+    threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
+    return jsonify({"status": "received"}), 200
 
 def send_reminder_task(med_id):
     with app.app_context():
         med = Medication.query.get(med_id)
         if not med: return
+        
+        # Only send if email alerts are enabled
+        if hasattr(med, 'email_enabled') and not med.email_enabled:
+            return
+
         subject = f"💊 Time for {med.name}"
-        body = f"Reminder: It is time to take {med.name} ({med.dose})."
+        body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
-        log = AlertLog(user_id=med.user_id, medication_name=med.name, status='sent' if success else 'failed', recipient=med.recipient_email, sent_at=get_now_naive())
+        
+        log = AlertLog(
+            user_id=med.user_id, 
+            medication_name=med.name, 
+            status='sent' if success else 'failed', 
+            recipient=med.recipient_email,
+            sent_at=get_now_naive()
+        )
         db.session.add(log)
         db.session.commit()
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
+# ── PWA & Service Worker ─────────────────────────────────────────────────────
+@app.route('/manifest.json')
+def serve_manifest():
+    return send_from_directory('static', 'manifest.json')
 
+@app.route('/sw.js')
+def serve_sw():
+    return send_from_directory('static', 'sw.js')
+
+# ── Startup ───────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
 
