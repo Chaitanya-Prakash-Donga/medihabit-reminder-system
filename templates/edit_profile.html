@@ -69,6 +69,7 @@
             font-size: 14px;
             outline: none;
             transition: border-color 0.2s;
+            box-sizing: border-box; /* Ensures padding doesn't break layout */
         }
 
         input:focus {
@@ -88,6 +89,7 @@
             text-decoration: none;
             display: block;
             text-align: center;
+            box-sizing: border-box;
         }
 
         .btn-primary {
@@ -127,7 +129,7 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST" action="{{ url_for('profile') }}">
+        <form action="{{ url_for('edit_profile') }}" method="POST">
             
             <div class="form-group">
                 <label for="name">Full Name</label>
