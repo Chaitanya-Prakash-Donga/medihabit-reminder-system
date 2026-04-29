@@ -42,7 +42,7 @@ def send_smtp_email(to_email, subject, body):
     sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in environment variables")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
         return False
 
     try:
@@ -204,43 +204,30 @@ def delete_medication(id):
 
 # ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
+@login_required
 def trigger_reminder(med_id):
-    """
-    Called by the Browser JS when the local clock matches med time.
-    @login_required is removed to prevent background fetch failures.
-    """
+    """Called by the Browser JS when the local clock matches med time."""
     threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
     return jsonify({"status": "received"}), 200
 
 def send_reminder_task(med_id):
     with app.app_context():
-        try:
-            med = Medication.query.get(med_id)
-            if not med:
-                print(f"❌ Error: Medication ID {med_id} not found in database.")
-                return
-            
-            subject = f"💊 Time for {med.name}"
-            body = f"Reminder: It is time to take {med.name} ({med.dose})."
-            
-            # Try to send email
-            success = send_smtp_email(med.recipient_email, subject, body)
-            
-            # Force log creation even if email fails so we can see the history
-            log = AlertLog(
-                user_id=med.user_id, 
-                medication_name=med.name, 
-                status='sent' if success else 'failed_smtp', 
-                recipient=med.recipient_email,
-                sent_at=get_now_naive()
-            )
-            db.session.add(log)
-            db.session.commit()
-            print(f"✅ Log created for {med.name} - Status: {'sent' if success else 'failed_smtp'}")
-            
-        except Exception as e:
-            db.session.rollback()
-            print(f"❌ Database/Thread Error: {str(e)}")
+        med = Medication.query.get(med_id)
+        if not med: return
+        
+        subject = f"💊 Time for {med.name}"
+        body = f"Reminder: It is time to take {med.name} ({med.dose})."
+        success = send_smtp_email(med.recipient_email, subject, body)
+        
+        log = AlertLog(
+            user_id=med.user_id, 
+            medication_name=med.name, 
+            status='sent' if success else 'failed', 
+            recipient=med.recipient_email,
+            sent_at=get_now_naive()
+        )
+        db.session.add(log)
+        db.session.commit()
 
 # ── PWA & Service Worker ─────────────────────────────────────────────────────
 @app.route('/manifest.json')
