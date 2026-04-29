@@ -44,6 +44,7 @@ def send_smtp_email(to_email, subject, body):
 
     try:
         msg = MIMEMultipart()
+        # CRITICAL: Sender name and email format
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
@@ -163,7 +164,6 @@ def dashboard():
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── FIXED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
@@ -182,13 +182,11 @@ def edit_medication(id):
         med.email_enabled = True if request.form.get('email_enabled') else False
         
         db.session.commit()
-        # Dynamic pop-up message
         flash(f'Medication "{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── FIXED: PROFILE ROUTE ─────────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
@@ -234,42 +232,61 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER ROUTE (Preserved Email/Voice Logic) ──────────────────────────────
+# ── UPDATED TRIGGER LOGIC: Prevent Duplicates & Fix Race Condition ───────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    # PREVENT DUPLICATES: Check last 2 minutes
+    med = Medication.query.get(med_id)
+    if not med:
+        return jsonify({"status": "not_found"}), 404
+
+    # 1. Check if sent in the last 2 minutes
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == Medication.query.get(med_id).name,
+        AlertLog.medication_name == med.name,
         AlertLog.sent_at >= datetime.now() - timedelta(minutes=2)
     ).first()
 
     if not already_sent:
-        threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
+        # 2. COMMIT THE LOG IMMEDIATELY (Before the thread starts)
+        # This acts as a "mutex lock" so rapid requests find this entry.
+        new_log = AlertLog(
+            user_id=session['user_id'],
+            medication_name=med.name,
+            status='pending', 
+            recipient=med.recipient_email,
+            sent_at=get_now_naive()
+        )
+        db.session.add(new_log)
+        db.session.commit()
+
+        # 3. Start thread, passing the Log ID to update it later
+        threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
         return jsonify({"status": "received"}), 200
     
     return jsonify({"status": "duplicate_prevented"}), 200
 
-def send_reminder_task(med_id):
+def send_reminder_task(med_id, log_id):
     with app.app_context():
         med = Medication.query.get(med_id)
+        log = AlertLog.query.get(log_id)
+        
         if not med or (hasattr(med, 'email_enabled') and not med.email_enabled):
+            if log:
+                log.status = 'disabled'
+                db.session.commit()
             return
         
         subject = f"💊 Time for {med.name}"
         body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
+        
+        # Actual SMTP Call
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        log = AlertLog(
-            user_id=med.user_id, 
-            medication_name=med.name, 
-            status='sent' if success else 'failed', 
-            recipient=med.recipient_email,
-            sent_at=get_now_naive()
-        )
-        db.session.add(log)
-        db.session.commit()
+        # Update the existing log entry
+        if log:
+            log.status = 'sent' if success else 'failed'
+            db.session.commit()
 
 # ── PWA & Service Worker ─────────────────────────────────────────────────────
 @app.route('/manifest.json')
