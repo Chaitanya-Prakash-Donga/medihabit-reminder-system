@@ -226,17 +226,13 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# ── FIXED: DELETE MEDICATION ROUTE WITH POP-UP ────────────────────────────────
 @app.route('/medication/delete/<int:id>')
 @login_required
 def delete_medication(id):
     med = Medication.query.get_or_404(id)
     if med.user_id == session['user_id']:
-        med_name = med.name # Store name before deleting
         db.session.delete(med)
         db.session.commit()
-        # Flash message for the dashboard pop-up
-        flash(f'"{med_name}" has been removed.', "success")
     return redirect(url_for('dashboard'))
 
 # ── TRIGGER ROUTE (Preserved Email/Voice Logic) ──────────────────────────────
