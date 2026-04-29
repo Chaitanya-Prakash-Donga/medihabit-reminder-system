@@ -153,9 +153,11 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // 1. Pass data from Flask
     const meds_js = {{ meds_js | tojson }};
     let sentThisMinute = new Set();
 
+    // Show the user's local timezone name next to the date
     document.getElementById('local-tz').innerText = `(${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
 
     function checkLocalTime() {
@@ -163,6 +165,7 @@
         const currentTime = now.getHours().toString().padStart(2, '0') + ":" + 
                             now.getMinutes().toString().padStart(2, '0');
 
+        // Clear the "already sent" list at the start of every new minute
         if (now.getSeconds() === 0) {
             sentThisMinute.clear();
         }
@@ -172,37 +175,21 @@
                 
                 console.log(`Alert triggered for ${med.name} at ${currentTime} local time.`);
                 
-                // 1. Play Voice Synthesis
+                // Trigger voice synthesis (requires user interaction first)
                 try {
                     const speech = new SpeechSynthesisUtterance(`Reminder: Time to take ${med.name}`);
                     window.speechSynthesis.speak(speech);
-                } catch (e) {
-                    console.error("Speech synthesis failed", e);
-                }
+                } catch (e) {}
 
-                // 2. Notify Backend to send the Email with updated fetch logic
-                fetch(`/trigger-reminder/${med.id}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                })
-                .then(response => {
-                    if (response.ok) {
-                        console.log("✅ Email request sent to server successfully");
-                        // Automatically refresh after 2 seconds to update the History Log
-                        setTimeout(() => { location.reload(); }, 2000); 
-                    } else {
-                        console.error("❌ Server refused the email request. Check backend logs.");
-                    }
-                })
-                .catch(err => console.error("🌐 Network error attempting to trigger email:", err));
+                // Notify Backend to send the Email
+                fetch(`/trigger-reminder/${med.id}`, { method: 'POST' });
 
                 sentThisMinute.add(med.id);
             }
         });
     }
 
+    // Check time every second
     setInterval(checkLocalTime, 1000);
 
     // One-time interaction to unlock browser voice synthesis
