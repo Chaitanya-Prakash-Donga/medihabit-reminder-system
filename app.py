@@ -33,26 +33,28 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (Updated to TLS 587 & Strict "From") ───────────────
+# ── Gmail SMTP Email Logic (Dynamic "From" & TLS 587) ─────────────────────────
 def send_smtp_email(to_email, subject, body):
+    # This pulls directly from Render's environment variables
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in Render")
         return False
 
     try:
         msg = MIMEMultipart()
-        # FIX 1: Ensure the "From" matches the authenticated Gmail address exactly
+        # DYNAMIC FIX: This ensures the 'From' always matches your Render config
+        # We use the variable directly so it updates automatically in the future
         msg['From'] = sender_email 
         msg['To'] = to_email
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        # FIX 4: Switch to Port 587 with STARTTLS for better cloud compatibility
+        # Using Port 587 (TLS) is more reliable for Render -> Gmail
         server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()  # Secure the connection
+        server.starttls() 
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.quit()
@@ -125,6 +127,12 @@ def register():
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
+            
+            # Optional: Welcome Email
+            welcome_subject = "Welcome to MediHabit!"
+            welcome_body = f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
+            send_smtp_email(email, welcome_subject, welcome_body)
+            
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
@@ -243,7 +251,6 @@ def trigger_reminder(med_id):
     if not med:
         return jsonify({"status": "not_found"}), 404
 
-    # 1. Check if sent in the last 2 minutes
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
         AlertLog.medication_name == med.name,
@@ -251,7 +258,6 @@ def trigger_reminder(med_id):
     ).first()
 
     if not already_sent:
-        # 2. COMMIT THE LOG IMMEDIATELY
         new_log = AlertLog(
             user_id=session['user_id'],
             medication_name=med.name,
@@ -262,7 +268,6 @@ def trigger_reminder(med_id):
         db.session.add(new_log)
         db.session.commit()
 
-        # 3. Start thread, passing the Log ID to update it later
         threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
         return jsonify({"status": "received"}), 200
     
@@ -282,10 +287,8 @@ def send_reminder_task(med_id, log_id):
         subject = f"💊 Time for {med.name}"
         body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
         
-        # Actual SMTP Call
         success = send_smtp_email(med.recipient_email, subject, body)
         
-        # Update the existing log entry
         if log:
             log.status = 'sent' if success else 'failed'
             db.session.commit()
