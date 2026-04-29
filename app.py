@@ -163,12 +163,13 @@ def dashboard():
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
-# ── UPDATED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
+# ── FIXED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
     med = Medication.query.get_or_404(id)
     if med.user_id != session['user_id']:
+        flash("Unauthorized access.", "danger")
         return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
@@ -181,13 +182,13 @@ def edit_medication(id):
         med.email_enabled = True if request.form.get('email_enabled') else False
         
         db.session.commit()
-        # Flash message sent to Dashboard
+        # Dynamic pop-up message
         flash(f'Medication "{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
-# ── UPDATED: PROFILE ROUTE ─────────────────────────────────────────────────────
+# ── FIXED: PROFILE ROUTE ─────────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
@@ -202,11 +203,9 @@ def profile():
             user_obj.set_password(new_password)
         
         db.session.commit()
-        # Flash message sent to Dashboard
         flash(f'Profile for "{user_obj.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
-    # Matches filename: edit_profile.html
     return render_template('edit_profile.html', user=user_obj)
 
 @app.route('/medication/add', methods=['POST'])
