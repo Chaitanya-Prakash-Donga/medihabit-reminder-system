@@ -1,6 +1,6 @@
 """
 MediHabit - app.py
-Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
+Full Flask backend: auth, CRUD, Gmail SMTP (TLS 587)
 Trigger-based reminders with duplicate prevention and fixed Profile/Edit routes.
 """
 import os
@@ -33,7 +33,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
+# ── Gmail SMTP Email Logic (Updated to TLS 587 & Strict "From") ───────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
@@ -44,15 +44,18 @@ def send_smtp_email(to_email, subject, body):
 
     try:
         msg = MIMEMultipart()
-        # CRITICAL: Sender name and email format
-        msg['From'] = f"MediHabit <{sender_email}>"
+        # FIX 1: Ensure the "From" matches the authenticated Gmail address exactly
+        msg['From'] = sender_email 
         msg['To'] = to_email
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
+        # FIX 4: Switch to Port 587 with STARTTLS for better cloud compatibility
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()  # Secure the connection
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
         return True
     except Exception as e:
         print(f"❌ Gmail SMTP Error: {str(e)}") 
@@ -232,7 +235,7 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── UPDATED TRIGGER LOGIC: Prevent Duplicates & Fix Race Condition ───────────
+# ── TRIGGER LOGIC: Commit Log Early to Block Race Conditions ─────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
@@ -248,8 +251,7 @@ def trigger_reminder(med_id):
     ).first()
 
     if not already_sent:
-        # 2. COMMIT THE LOG IMMEDIATELY (Before the thread starts)
-        # This acts as a "mutex lock" so rapid requests find this entry.
+        # 2. COMMIT THE LOG IMMEDIATELY
         new_log = AlertLog(
             user_id=session['user_id'],
             medication_name=med.name,
