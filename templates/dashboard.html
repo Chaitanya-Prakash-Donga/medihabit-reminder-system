@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
         body { background-color: #f8f9fa; font-family: 'Inter', sans-serif; color: #333; }
-        .navbar { background: white; border-bottom: 1px solid #eee; padding: 10px 0; }
+        .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; }
         .nav-user { display: flex; align-items: center; gap: 10px; }
         
         /* Profile Link Styling */
@@ -23,7 +23,7 @@
         }
         .profile-clickable:hover { opacity: 0.8; cursor: pointer; }
 
-        .avatar-circle { width: 40px; height: 40px; background: #e3f2fd; color: #1976d2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .avatar-circle { width: 35px; height: 35px; background: #e3f2fd; color: #1976d2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
         .stat-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #efefef; height: 100%; }
         .stat-label { color: #888; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px; }
@@ -43,6 +43,7 @@
         .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; }
         .btn-remove { border: 1px solid #ffcdd2; color: #d32f2f; }
 
+        /* Enhanced Global Toast Animation */
         @keyframes fadeInDown {
             from { opacity: 0; transform: translate(-50%, -20px); }
             to { opacity: 1; transform: translate(-50%, 0); }
@@ -79,9 +80,9 @@
 
 <nav class="navbar mb-5">
     <div class="container d-flex justify-content-between align-items-center">
-        <div class="d-flex align-items-center">
-            <img src="/static/icon-192.png" width="70" height="70" alt="Logo" style="object-fit: contain; margin-right: 15px;">
-            <span class="fw-bold fs-3">MediHabit</span>
+        <div class="d-flex align-items-center gap-3">
+            <img src="/static/icon-192.png" width="50" height="50" alt="Logo" style="object-fit: contain;">
+            <span class="fw-bold fs-4">MediHabit</span>
         </div>
         <div class="nav-user">
             <a href="/profile" class="profile-clickable">
@@ -186,16 +187,10 @@
                         <input type="time" name="time2" class="form-control bg-light border-0">
                     </div>
                 </div>
-                <div class="mb-3">
+                <div class="mb-4">
                     <label class="small fw-bold text-muted">Recipient Email</label>
                     <input type="email" name="recipient_email" class="form-control bg-light border-0" value="{{ session.get('user_email', '') }}" required>
                 </div>
-                
-                <div class="mb-4">
-                    <label class="small fw-bold text-muted">Notes (Optional)</label>
-                    <textarea name="notes" class="form-control bg-light border-0" rows="2" placeholder="e.g. Take with food"></textarea>
-                </div>
-
                 <button type="submit" class="btn btn-dark w-100 py-2">Save Medication</button>
             </div>
         </form>
@@ -213,7 +208,7 @@
             t.style.transform = "translateY(-10px)";
             setTimeout(() => t.remove(), 500);
         });
-    }, 4000);
+    }, 4000); // Increased duration slightly for readability
 
     // --- Medication Alert Logic ---
     const meds_js = {{ meds_js | tojson }};
