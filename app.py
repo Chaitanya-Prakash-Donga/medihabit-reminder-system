@@ -1,15 +1,9 @@
-"""
-MediHabit - app.py
-Full Flask backend: auth, CRUD, Gmail SMTP (TLS 587)
-Trigger-based reminders with duplicate prevention and fixed Profile/Edit routes.
-"""
 import os
 import threading
 import smtplib
 from datetime import datetime, timedelta
 from functools import wraps
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from email.message import EmailMessage
 
 from flask import (Flask, render_template, request,
                    redirect, url_for, session, flash, send_from_directory, jsonify)
@@ -33,35 +27,35 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (Dynamic "From" & TLS 587) ─────────────────────────
+# ── Gmail SMTP Email Logic (Updated for Reliability) ──────────────────────────
 def send_smtp_email(to_email, subject, body):
-    # This pulls directly from Render's environment variables
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in Render")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD environment variables are missing.")
         return False
+
+    # Using EmailMessage for better compatibility and cleaner headers
+    msg = EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = sender_email
+    msg['To'] = to_email
+    msg.set_content(body)
 
     try:
-        msg = MIMEMultipart()
-        # DYNAMIC FIX: This ensures the 'From' always matches your Render config
-        # We use the variable directly so it updates automatically in the future
-        msg['From'] = sender_email 
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
-
-        # Using Port 587 (TLS) is more reliable for Render -> Gmail
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls() 
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
-        server.quit()
+        # Explicitly using Port 587 with STARTTLS for Render compatibility
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+            server.starttls() 
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            print(f"✅ Email successfully sent to {to_email}")
         return True
+    except smtplib.SMTPAuthenticationError:
+        print("❌ SMTP Error: Authentication failed. Check your App Password.")
     except Exception as e:
         print(f"❌ Gmail SMTP Error: {str(e)}") 
-        return False
+    return False
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
@@ -128,10 +122,12 @@ def register():
             db.session.add(user)
             db.session.commit()
             
-            # Optional: Welcome Email
-            welcome_subject = "Welcome to MediHabit!"
-            welcome_body = f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
-            send_smtp_email(email, welcome_subject, welcome_body)
+            # Welcome Email triggered via background thread to avoid slowing registration
+            threading.Thread(target=send_smtp_email, args=(
+                email, 
+                "Welcome to MediHabit!", 
+                f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
+            )).start()
             
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
@@ -243,7 +239,7 @@ def delete_medication(id):
         db.session.commit()
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER LOGIC: Commit Log Early to Block Race Conditions ─────────────────
+# ── TRIGGER LOGIC: Handles Dashboard Updates + Email ──────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
@@ -251,6 +247,7 @@ def trigger_reminder(med_id):
     if not med:
         return jsonify({"status": "not_found"}), 404
 
+    # Duplicate prevention: Check if alert was already logged in last 2 mins
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
         AlertLog.medication_name == med.name,
@@ -268,6 +265,7 @@ def trigger_reminder(med_id):
         db.session.add(new_log)
         db.session.commit()
 
+        # Execute email in a separate thread so the dashboard stays fast
         threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
         return jsonify({"status": "received"}), 200
     
@@ -278,6 +276,7 @@ def send_reminder_task(med_id, log_id):
         med = Medication.query.get(med_id)
         log = AlertLog.query.get(log_id)
         
+        # Check if medication exists and email is enabled
         if not med or (hasattr(med, 'email_enabled') and not med.email_enabled):
             if log:
                 log.status = 'disabled'
@@ -285,10 +284,16 @@ def send_reminder_task(med_id, log_id):
             return
         
         subject = f"💊 Time for {med.name}"
-        body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
+        body = (f"Hello,\n\nThis is a reminder to take your medication:\n"
+                f"Medication: {med.name}\n"
+                f"Dosage: {med.dose}\n"
+                f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
+                f"Sent via MediHabit Reminder System.")
         
+        # Trigger the actual SMTP send
         success = send_smtp_email(med.recipient_email, subject, body)
         
+        # Update the AlertLog status in the DB so it shows correctly on the dashboard
         if log:
             log.status = 'sent' if success else 'failed'
             db.session.commit()
