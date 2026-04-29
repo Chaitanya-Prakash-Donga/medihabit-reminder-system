@@ -101,9 +101,16 @@
             border: 1px solid var(--border);
         }
 
-        .btn:hover {
-            opacity: 0.9;
+        .alert {
+            padding: 10px;
+            border-radius: var(--radius);
+            margin-bottom: 16px;
+            font-size: 13px;
+            text-align: center;
         }
+
+        .alert-danger { background: #fcebeb; color: #791f1f; }
+        .alert-success { background: #eaf3de; color: #27500a; }
     </style>
 </head>
 <body>
@@ -111,6 +118,14 @@
 <div class="container">
     <div class="card">
         <h2>Edit Profile</h2>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
 
         <form method="POST" action="{{ url_for('profile') }}">
             
