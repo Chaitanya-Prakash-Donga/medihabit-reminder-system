@@ -1,7 +1,7 @@
 """
 MediHabit - app.py
 Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
-Trigger-based reminders with duplicate prevention and professional email templates.
+Trigger-based reminders with duplicate prevention and fixed Profile/Edit routes.
 """
 import os
 import threading
@@ -114,35 +114,13 @@ def register():
             name = request.form.get('name')
             email = request.form.get('email').strip().lower()
             pw = request.form.get('password')
-            
             if User.query.filter_by(email=email).first():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
-            
             user = User(name=name, email=email)
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
-
-            # --- PROFESSIONAL WELCOME EMAIL ---
-            welcome_subject = "Welcome to MediHabit – Your Health, Simplified"
-            welcome_body = f"""
-            Hello {name},
-
-            Thank you for registering with MediHabit! We are excited to help you manage your health journey.
-
-            With MediHabit, you can:
-            • Track your daily medications and dosages.
-            • Receive timely email reminders.
-            • Stay on top of your health schedule with ease.
-
-            Your account is now active. You can log in anytime to manage your schedule.
-
-            Stay Healthy,
-            The MediHabit Team
-            """
-            threading.Thread(target=send_smtp_email, args=(email, welcome_subject, welcome_body), daemon=True).start()
-            
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
@@ -185,6 +163,7 @@ def dashboard():
                            logs=logs, 
                            today_date=datetime.now().strftime('%A, %d %B'))
 
+# ── UPDATED: EDIT MEDICATION ROUTE ─────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
@@ -202,11 +181,13 @@ def edit_medication(id):
         med.email_enabled = True if request.form.get('email_enabled') else False
         
         db.session.commit()
+        # Flash message sent to Dashboard
         flash(f'Medication "{med.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
     return render_template('edit_medication.html', med=med)
 
+# ── UPDATED: PROFILE ROUTE ─────────────────────────────────────────────────────
 @app.route('/profile', methods=['GET', 'POST']) 
 @login_required
 def profile():
@@ -221,12 +202,13 @@ def profile():
             user_obj.set_password(new_password)
         
         db.session.commit()
+        # Flash message sent to Dashboard
         flash(f'Profile for "{user_obj.name}" updated successfully!', "success")
         return redirect(url_for('dashboard'))
 
+    # Matches filename: edit_profile.html
     return render_template('edit_profile.html', user=user_obj)
 
-# ── UPDATED: ADD MEDICATION ROUTE WITH NOTES ──────────────────────────────────
 @app.route('/medication/add', methods=['POST'])
 @login_required
 def add_medication():
@@ -237,28 +219,31 @@ def add_medication():
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
         recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes')  # This line now captures the note from the dashboard
+        notes=request.form.get('notes')
     )
     db.session.add(m)
     db.session.commit()
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
+# ── FIXED: DELETE MEDICATION ROUTE WITH POP-UP ────────────────────────────────
 @app.route('/medication/delete/<int:id>')
 @login_required
 def delete_medication(id):
     med = Medication.query.get_or_404(id)
     if med.user_id == session['user_id']:
-        med_name = med.name 
+        med_name = med.name # Store name before deleting
         db.session.delete(med)
         db.session.commit()
+        # Flash message for the dashboard pop-up
         flash(f'"{med_name}" has been removed.', "success")
     return redirect(url_for('dashboard'))
 
-# ── TRIGGER ROUTE ─────────────────────────────────────────────────────────────
+# ── TRIGGER ROUTE (Preserved Email/Voice Logic) ──────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
+    # PREVENT DUPLICATES: Check last 2 minutes
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
         AlertLog.medication_name == Medication.query.get(med_id).name,
@@ -277,28 +262,8 @@ def send_reminder_task(med_id):
         if not med or (hasattr(med, 'email_enabled') and not med.email_enabled):
             return
         
-        # --- PROFESSIONAL REMINDER CONTENT ---
-        subject = f"🔔 REMINDER: Time for your {med.name}"
-        
-        body = f"""
-        MEDICATION REMINDER
-        ------------------------------------------
-        Hello, this is a scheduled reminder from MediHabit.
-
-        It is time to take your medication:
-        
-        💊 Medicine: {med.name}
-        📏 Dosage: {med.dose}
-        ⏰ Scheduled Time: {med.time1}
-        📝 Notes: {med.notes if med.notes else "No specific notes provided."}
-
-        Please ensure you take your dose as prescribed by your healthcare provider.
-        
-        View your dashboard: {request.host_url}dashboard
-        ------------------------------------------
-        Thank you for using MediHabit to manage your wellness.
-        """
-        
+        subject = f"💊 Time for {med.name}"
+        body = f"Reminder: It is time to take {med.name} ({med.dose}).\nNotes: {med.notes}"
         success = send_smtp_email(med.recipient_email, subject, body)
         
         log = AlertLog(
