@@ -29,28 +29,27 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (UPDATED FOR RENDER) ──────────────────────────────
+# ── Gmail SMTP Email Logic (UPDATED FOR RENDER SAFE SSL) ─────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in environment")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in Render")
         return False
 
     try:
         msg = MIMEMultipart()
-        # Force 'From' to match the authenticated user for Gmail's security
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        # Using SMTP_SSL on Port 465 is more reliable on Render/Cloud hosts
+        # Use SMTP_SSL (Port 465) - This bypasses Render's Port 587 block
         with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15) as server:
             server.login(sender_email, sender_password)
             server.send_message(msg)
-            
+        
         print(f"✅ Success! Email sent to {to_email}")
         return True
     except Exception as e:
@@ -268,13 +267,16 @@ def serve_manifest():
 def serve_sw():
     return send_from_directory('static', 'sw.js')
 
-# ── Startup ───────────────────────────────────────────────────────────────────
+# ── Startup & Scheduler ──────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
 
+# Initialize Scheduler safely for Gunicorn environment
 scheduler = BackgroundScheduler()
-scheduler.add_job(check_and_send, 'interval', minutes=1)
-scheduler.start()
+if not scheduler.running:
+    scheduler.add_job(check_and_send, 'interval', minutes=1, id='med_reminder_job', replace_existing=True)
+    scheduler.start()
 
 if __name__ == '__main__':
+    # use_reloader=False prevents the scheduler from starting twice locally
     app.run(debug=True, use_reloader=False)
