@@ -1,7 +1,13 @@
+"""
+MediHabit - app.py
+Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
+Trigger-based reminders for universal timezone support.
+"""
 import os
 import threading
 import smtplib
-from datetime import datetime, timedelta
+import pytz
+from datetime import datetime
 from functools import wraps
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -10,12 +16,13 @@ from flask import (Flask, render_template, request,
                    redirect, url_for, session, flash, send_from_directory, jsonify)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
+# Using SECURITY_KEY or SECRET_KEY from environment
 app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
 
+# Helper: Get current time as a 'naive' object for DB consistency
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
 
@@ -29,13 +36,13 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (UPDATED FOR RENDER SAFE SSL) ─────────────────────
+# ── Gmail SMTP Email Logic (Secure SSL 465) ──────────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
-    sender_password = os.environ.get('GMAIL_PASSWORD')
+    sender_password = os.environ.get('GMAIL_PASSWORD') # 16-character App Password
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in Render")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set")
         return False
 
     try:
@@ -45,15 +52,12 @@ def send_smtp_email(to_email, subject, body):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        # Use SMTP_SSL (Port 465) - This bypasses Render's Port 587 block
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15) as server:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        
-        print(f"✅ Success! Email sent to {to_email}")
         return True
     except Exception as e:
-        print(f"❌ Render SMTP Error: {str(e)}") 
+        print(f"❌ Gmail SMTP Error: {str(e)}") 
         return False
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -82,7 +86,6 @@ class Medication(db.Model):
     recipient_email = db.Column(db.String(120))
     notes = db.Column(db.String(300))
     active = db.Column(db.Boolean, default=True)
-    email_enabled = db.Column(db.Boolean, default=True)
 
 class AlertLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -101,48 +104,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ── Automated Reminder Engine ────────────────────────────────────────────────
-def send_reminder_task(med_id, log_id=None):
-    """Handles the actual email sending and database logging."""
-    with app.app_context():
-        med = Medication.query.get(med_id)
-        if not med or not med.active:
-            return
-
-        subject = f"💊 Time for {med.name}"
-        body = (f"Hello,\n\nThis is a reminder to take your medication:\n"
-                f"Medication: {med.name}\n"
-                f"Dosage: {med.dose}\n"
-                f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                f"Sent via MediHabit Reminder System.")
-
-        success = send_smtp_email(med.recipient_email, subject, body)
-
-        if log_id:
-            log = AlertLog.query.get(log_id)
-            if log:
-                log.status = 'sent' if success else 'failed'
-                db.session.commit()
-        else:
-            new_log = AlertLog(
-                user_id=med.user_id,
-                medication_name=med.name,
-                status='sent' if success else 'failed',
-                recipient=med.recipient_email,
-                sent_at=get_now_naive()
-            )
-            db.session.add(new_log)
-            db.session.commit()
-
-def check_and_send():
-    """Background job that runs every minute to check scheduled times."""
-    with app.app_context():
-        now_str = get_now_naive().strftime('%H:%M')
-        meds = Medication.query.filter_by(active=True, email_enabled=True).all()
-        for m in meds:
-            if m.time1 == now_str or m.time2 == now_str:
-                threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
-
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
@@ -155,19 +116,19 @@ def register():
             name = request.form.get('name')
             email = request.form.get('email').strip().lower()
             pw = request.form.get('password')
+            
             if User.query.filter_by(email=email).first():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
+            
             user = User(name=name, email=email)
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
             
-            threading.Thread(target=send_smtp_email, args=(
-                email, 
-                "Welcome to MediHabit!", 
-                f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
-            )).start()
+            # Welcome Mail
+            welcome_body = f"Hi {name},\n\nWelcome to MediHabit! Your medicine reminders are now ready."
+            threading.Thread(target=send_smtp_email, args=(email, "Welcome! 💊", welcome_body)).start()
             
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
@@ -184,6 +145,7 @@ def login():
         user = User.query.filter_by(email=email).first()
         if user and user.check_password(pw):
             session.update({'user_id': user.id, 'user_name': user.name, 'user_email': user.email})
+            flash(f"Welcome back, {user.name}!", "success")
             return redirect(url_for('dashboard'))
         flash("Invalid email or password.", "danger")
     return render_template('login.html')
@@ -198,7 +160,11 @@ def logout():
 def dashboard():
     uid = session.get('user_id')
     meds = Medication.query.filter_by(user_id=uid).all() 
+    
+    # Critical: Include 'id' so JavaScript can call the trigger route
     meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
+
+    # Show logs for today (based on server date)
     today_date = get_now_naive().date()
     logs = AlertLog.query.filter(
         AlertLog.user_id == uid, 
@@ -220,43 +186,48 @@ def add_medication():
         dose=request.form.get('dose'),
         time1=request.form.get('time1'),
         time2=request.form.get('time2') or None,
-        recipient_email=request.form.get('recipient_email'),
-        notes=request.form.get('notes'),
-        email_enabled=True
+        recipient_email=request.form.get('recipient_email')
     )
     db.session.add(m)
     db.session.commit()
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
+@app.route('/medication/delete/<int:id>')
+@login_required
+def delete_medication(id):
+    med = Medication.query.get_or_404(id)
+    if med.user_id == session['user_id']:
+        db.session.delete(med)
+        db.session.commit()
+    return redirect(url_for('dashboard'))
+
+# ── LOCATION-AWARE TRIGGER ROUTE ─────────────────────────────────────────────
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
-    med = Medication.query.get(med_id)
-    if not med:
-        return jsonify({"status": "not_found"}), 404
+    """Called by the Browser JS when the local clock matches med time."""
+    threading.Thread(target=send_reminder_task, args=(med_id,), daemon=True).start()
+    return jsonify({"status": "received"}), 200
 
-    already_sent = AlertLog.query.filter(
-        AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == med.name,
-        AlertLog.sent_at >= datetime.now() - timedelta(minutes=2)
-    ).first()
-
-    if not already_sent:
-        new_log = AlertLog(
-            user_id=session['user_id'],
-            medication_name=med.name,
-            status='pending', 
+def send_reminder_task(med_id):
+    with app.app_context():
+        med = Medication.query.get(med_id)
+        if not med: return
+        
+        subject = f"💊 Time for {med.name}"
+        body = f"Reminder: It is time to take {med.name} ({med.dose})."
+        success = send_smtp_email(med.recipient_email, subject, body)
+        
+        log = AlertLog(
+            user_id=med.user_id, 
+            medication_name=med.name, 
+            status='sent' if success else 'failed', 
             recipient=med.recipient_email,
             sent_at=get_now_naive()
         )
-        db.session.add(new_log)
+        db.session.add(log)
         db.session.commit()
-
-        threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
-        return jsonify({"status": "received"}), 200
-    
-    return jsonify({"status": "duplicate_prevented"}), 200
 
 # ── PWA & Service Worker ─────────────────────────────────────────────────────
 @app.route('/manifest.json')
@@ -267,16 +238,9 @@ def serve_manifest():
 def serve_sw():
     return send_from_directory('static', 'sw.js')
 
-# ── Startup & Scheduler ──────────────────────────────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
 
-# Initialize Scheduler safely for Gunicorn environment
-scheduler = BackgroundScheduler()
-if not scheduler.running:
-    scheduler.add_job(check_and_send, 'interval', minutes=1, id='med_reminder_job', replace_existing=True)
-    scheduler.start()
-
 if __name__ == '__main__':
-    # use_reloader=False prevents the scheduler from starting twice locally
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=True)
