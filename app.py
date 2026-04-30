@@ -27,36 +27,32 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic (Updated for Reliability) ──────────────────────────
+# ── Gmail SMTP Email Logic ──────────────────────────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
     
     if not sender_email or not sender_password:
-        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD environment variables are missing.")
+        print("❌ Error: GMAIL_USER or GMAIL_PASSWORD not set in environment")
         return False
 
-    # Using EmailMessage for better compatibility and cleaner headers
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = sender_email
-    msg['To'] = to_email
-    msg.set_content(body)
-
     try:
-        # Explicitly using Port 587 with STARTTLS for Render compatibility
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-            server.starttls() 
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-            print(f"✅ Email successfully sent to {to_email}")
+        msg = MIMEMultipart()
+        msg['From'] = f"MediHabit <{sender_email}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Standard Gmail SMTP Setup
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
         return True
-    except smtplib.SMTPAuthenticationError:
-        print("❌ SMTP Error: Authentication failed. Check your App Password.")
     except Exception as e:
         print(f"❌ Gmail SMTP Error: {str(e)}") 
-    return False
-
+        return False
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
