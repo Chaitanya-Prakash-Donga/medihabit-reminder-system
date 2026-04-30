@@ -29,7 +29,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Gmail SMTP Email Logic ──────────────────────────────────────────────────
+# ── Gmail SMTP Email Logic (UPDATED FOR RENDER) ──────────────────────────────
 def send_smtp_email(to_email, subject, body):
     sender_email = os.environ.get('GMAIL_USER')
     sender_password = os.environ.get('GMAIL_PASSWORD')
@@ -40,19 +40,21 @@ def send_smtp_email(to_email, subject, body):
 
     try:
         msg = MIMEMultipart()
+        # Force 'From' to match the authenticated user for Gmail's security
         msg['From'] = f"MediHabit <{sender_email}>"
         msg['To'] = to_email
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
-        server.quit()
+        # Using SMTP_SSL on Port 465 is more reliable on Render/Cloud hosts
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            
+        print(f"✅ Success! Email sent to {to_email}")
         return True
     except Exception as e:
-        print(f"❌ Gmail SMTP Error: {str(e)}") 
+        print(f"❌ Render SMTP Error: {str(e)}") 
         return False
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -118,13 +120,11 @@ def send_reminder_task(med_id, log_id=None):
         success = send_smtp_email(med.recipient_email, subject, body)
 
         if log_id:
-            # Update existing log (from manual trigger)
             log = AlertLog.query.get(log_id)
             if log:
                 log.status = 'sent' if success else 'failed'
                 db.session.commit()
         else:
-            # Create new log (from automated scheduler)
             new_log = AlertLog(
                 user_id=med.user_id,
                 medication_name=med.name,
@@ -142,7 +142,6 @@ def check_and_send():
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                # Use thread to prevent blocking the scheduler
                 threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -238,7 +237,6 @@ def trigger_reminder(med_id):
     if not med:
         return jsonify({"status": "not_found"}), 404
 
-    # Duplicate prevention (2 mins)
     already_sent = AlertLog.query.filter(
         AlertLog.user_id == session['user_id'],
         AlertLog.medication_name == med.name,
@@ -274,11 +272,9 @@ def serve_sw():
 with app.app_context():
     db.create_all()
 
-# Initialize Scheduler
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_and_send, 'interval', minutes=1)
 scheduler.start()
 
 if __name__ == '__main__':
-    # use_reloader=False prevents the scheduler from starting twice
     app.run(debug=True, use_reloader=False)
