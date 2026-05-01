@@ -1,13 +1,11 @@
 """
 MediHabit - app.py
-Full Flask backend: auth, CRUD, Gmail SMTP (SSL 465)
+Full Flask backend: auth, CRUD, Resend API Integration
 Trigger-based reminders for universal timezone support.
 """
 import os
 import threading
-import json
-import urllib.request
-import urllib.parse
+import resend
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -20,6 +18,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
+
+# Initialize Resend API Key
+resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def get_now_naive():
     return datetime.now().replace(tzinfo=None)
@@ -34,111 +35,24 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-
-# ── Gmail REST API Email (HTTPS only — works on Render free tier) ─────────────
-# 
-# SETUP INSTRUCTIONS (one-time):
-# 1. Go to https://console.cloud.google.com/
-# 2. Create a project → Enable "Gmail API"
-# 3. OAuth consent screen → External → Add your Gmail as test user
-# 4. Credentials → Create OAuth 2.0 Client ID → Desktop App
-# 5. Download the client_secret JSON, note client_id and client_secret
-# 6. Run this once locally to get your refresh_token:
-#
-#    from google_auth_oauthlib.flow import InstalledAppFlow
-#    flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', ['https://www.googleapis.com/auth/gmail.send'])
-#    creds = flow.run_local_server(port=0)
-#    print("REFRESH TOKEN:", creds.refresh_token)
-#
-# 7. Set these 3 environment variables in Render:
-#    GMAIL_CLIENT_ID      → from Google Cloud Console
-#    GMAIL_CLIENT_SECRET  → from Google Cloud Console
-#    GMAIL_REFRESH_TOKEN  → from step 6
-#    GMAIL_USER           → your Gmail address (e.g. you@gmail.com)
-#
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _get_gmail_access_token():
-    """Exchange the stored refresh token for a short-lived access token."""
-    client_id     = os.environ.get('GMAIL_CLIENT_ID')
-    client_secret = os.environ.get('GMAIL_CLIENT_SECRET')
-    refresh_token = os.environ.get('GMAIL_REFRESH_TOKEN')
-
-    if not all([client_id, client_secret, refresh_token]):
-        print("❌ Missing GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN env vars")
-        return None
-
-    data = urllib.parse.urlencode({
-        'client_id':     client_id,
-        'client_secret': client_secret,
-        'refresh_token': refresh_token,
-        'grant_type':    'refresh_token',
-    }).encode()
-
-    req = urllib.request.Request(
-        'https://oauth2.googleapis.com/token',
-        data=data,
-        method='POST'
-    )
-    req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-            return result.get('access_token')
-    except Exception as e:
-        print(f"❌ Token refresh error: {e}")
-        return None
-
-
-def send_smtp_email(to_email, subject, body):
+# ── Resend Email Function (Works on Render Free Tier) ────────────────────────
+def send_mail_via_resend(to_email, subject, body):
     """
-    Sends email via Gmail REST API (HTTPS port 443).
-    Drop-in replacement for the old SMTP function — same signature.
+    Sends email via Resend SDK. 
+    Note: If you haven't verified a domain, you MUST use 'onboarding@resend.dev' as the sender.
     """
-    import base64
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
-    sender_email = os.environ.get('GMAIL_USER')
-    if not sender_email:
-        print("❌ GMAIL_USER env var not set")
-        return False
-
-    access_token = _get_gmail_access_token()
-    if not access_token:
-        return False
-
-    # Build the MIME message
-    msg = MIMEMultipart()
-    msg['From']    = f"MediHabit <{sender_email}>"
-    msg['To']      = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
-    # Gmail API expects base64url-encoded raw message
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    payload = json.dumps({'raw': raw}).encode()
-
-    req = urllib.request.Request(
-        'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-        data=payload,
-        method='POST'
-    )
-    req.add_header('Authorization', f'Bearer {access_token}')
-    req.add_header('Content-Type', 'application/json')
-
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-            print(f"✅ Email sent to {to_email} | Message ID: {result.get('id')}")
-            return True
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        print(f"❌ Gmail API HTTPError {e.code}: {error_body}")
-        return False
+        params = {
+            "from": "MediHabit <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+        }
+        resend.Emails.send(params)
+        print(f"✅ Email sent to {to_email} via Resend")
+        return True
     except Exception as e:
-        print(f"❌ Gmail API error: {e}")
+        print(f"❌ Resend Error: {e}")
         return False
 
 
@@ -191,7 +105,7 @@ def login_required(f):
 
 # ── Automated Reminder Engine ─────────────────────────────────────────────────
 def send_reminder_task(med_id, log_id=None):
-    """Handles the actual email sending and database logging."""
+    """Handles the actual email sending via Resend and database logging."""
     with app.app_context():
         med = Medication.query.get(med_id)
         if not med or not med.active:
@@ -204,7 +118,8 @@ def send_reminder_task(med_id, log_id=None):
                 f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
                 f"Sent via MediHabit Reminder System.")
 
-        success = send_smtp_email(med.recipient_email, subject, body)
+        # Updated to use Resend
+        success = send_mail_via_resend(med.recipient_email, subject, body)
 
         if log_id:
             log = AlertLog.query.get(log_id)
@@ -253,7 +168,8 @@ def register():
             db.session.add(user)
             db.session.commit()
 
-            threading.Thread(target=send_smtp_email, args=(
+            # Updated to use Resend for Welcome Email
+            threading.Thread(target=send_mail_via_resend, args=(
                 email,
                 "Welcome to MediHabit!",
                 f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
@@ -343,6 +259,7 @@ def trigger_reminder(med_id):
         db.session.add(new_log)
         db.session.commit()
 
+        # Updated to use Resend
         threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
         return jsonify({"status": "received"}), 200
 
