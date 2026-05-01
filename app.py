@@ -75,7 +75,7 @@ class Medication(db.Model):
     time1 = db.Column(db.String(5))
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
-    notes = db.Column(db.String(300))
+    notes = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True)
     email_enabled = db.Column(db.Boolean, default=True)
 
@@ -84,7 +84,7 @@ class AlertLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
-    sent_at = db.Column(db.DateTime, nullable=False)
+    sent_at = db.Column(db.DateTime, default=get_now_naive)
     status = db.Column(db.String(20))
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -135,8 +135,7 @@ def check_and_send():
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                # FIX: Check if a log entry was already created for this med in the last 60 seconds
-                # to prevent duplicate emails from the 1-minute interval scheduler.
+                # Check if a log entry was already created for this med in the last 60 seconds
                 recent_log = AlertLog.query.filter(
                     AlertLog.user_id == m.user_id,
                     AlertLog.medication_name == m.name,
@@ -188,7 +187,7 @@ def login():
         if user and user.check_password(pw):
             session.update({'user_id': user.id, 'user_name': user.name, 'user_email': user.email})
             return redirect(url_for('dashboard'))
-        flash("Invalid email or password.", "danger")
+        flash("Invalid credentials", "danger")
     return render_template('login.html')
 
 @app.route('/logout')
@@ -200,6 +199,7 @@ def logout():
 @login_required
 def dashboard():
     uid = session.get('user_id')
+    user = User.query.get(uid)
     meds = Medication.query.filter_by(user_id=uid).all()
     meds_js = [{"id": m.id, "name": m.name, "t1": m.time1, "t2": m.time2} for m in meds]
     today_date = get_now_naive().date()
@@ -212,6 +212,7 @@ def dashboard():
                            meds=meds,
                            meds_js=meds_js,
                            logs=logs,
+                           user=user,
                            today_date=datetime.now().strftime('%A, %d %B'))
 
 @app.route('/medication/add', methods=['POST'])
@@ -232,10 +233,11 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-@app.route('/medication/edit/<int:med_id>', methods=['GET', 'POST'])
+# FIX FOR IMAGE_660E61.PNG: Matching 'id' and 'edit_medicine.html'
+@app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
-def edit_medication(med_id):
-    med = Medication.query.get_or_404(med_id)
+def edit_medication(id):
+    med = Medication.query.get_or_404(id)
     if med.user_id != session['user_id']:
         abort(403)
         
@@ -246,16 +248,18 @@ def edit_medication(med_id):
         med.time2 = request.form.get('time2') or None
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
+        med.email_enabled = 'email_enabled' in request.form
         db.session.commit()
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
-    return render_template('edit_medication.html', med=med)
+    return render_template('edit_medicine.html', med=med)
 
-@app.route('/medication/delete/<int:med_id>', methods=['POST'])
+# FIX FOR IMAGE_660D84.PNG: Method Not Allowed
+@app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
-def delete_medication(med_id):
-    med = Medication.query.get_or_404(med_id)
+def delete_medication(id):
+    med = Medication.query.get_or_404(id)
     if med.user_id != session['user_id']:
         abort(403)
     db.session.delete(med)
@@ -263,19 +267,19 @@ def delete_medication(med_id):
     flash("Medication deleted.", "success")
     return redirect(url_for('dashboard'))
 
-@app.route('/profile/edit', methods=['GET', 'POST'])
+# FIX FOR IMAGE_660AD7.PNG: Named 'profile' to match url_for('profile')
+@app.route('/profile', methods=['GET', 'POST'])
 @login_required
-def edit_profile():
+def profile():
     user = User.query.get_or_404(session['user_id'])
     if request.method == 'POST':
         user.name = request.form.get('name')
-        user.email = request.form.get('email').strip().lower()
         new_pw = request.form.get('password')
         if new_pw:
             user.set_password(new_pw)
         db.session.commit()
         session['user_name'] = user.name
-        flash("Profile updated!", "success")
+        flash("Profile updated successfully!", "success")
         return redirect(url_for('dashboard'))
     return render_template('edit_profile.html', user=user)
 
@@ -298,12 +302,10 @@ def trigger_reminder(med_id):
 with app.app_context():
     db.create_all()
 
-# Scheduler logic with a check to prevent multiple starts
 scheduler = BackgroundScheduler()
 if not scheduler.running:
     scheduler.add_job(check_and_send, 'interval', minutes=1, id='med_job', replace_existing=True)
     scheduler.start()
 
 if __name__ == '__main__':
-    # FIX: Changed use_reloader to False to prevent the scheduler from running twice in dev
     app.run(debug=True, use_reloader=False)
