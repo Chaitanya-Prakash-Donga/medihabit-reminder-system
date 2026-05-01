@@ -36,6 +36,7 @@ db = SQLAlchemy(app)
 
 # ── Resend Email Function ─────────────────────────────────────────────────────
 def send_mail_via_resend(to_email, subject, body):
+    """Sends email via Resend SDK using the onboarding domain."""
     try:
         params = {
             "from": "MediHabit <onboarding@resend.dev>",
@@ -44,6 +45,7 @@ def send_mail_via_resend(to_email, subject, body):
             "text": body,
         }
         resend.Emails.send(params)
+        print(f"✅ Email sent to {to_email} via Resend")
         return True
     except Exception as e:
         print(f"❌ Resend Error: {e}")
@@ -105,7 +107,7 @@ def send_reminder_task(med_id, log_id=None):
                 f"Medication: {med.name}\n"
                 f"Dosage: {med.dose}\n"
                 f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                f"Sent via MediHabit.")
+                f"Sent via MediHabit Reminder System.")
 
         success = send_mail_via_resend(med.recipient_email, subject, body)
 
@@ -222,11 +224,13 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# FIX: Variable 'id' now matches dashboard.html precisely
+# ── UPDATED EDIT ROUTE ────────────────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
-    med = Medication.query.get_or_404(id)
+    # This 'id' matches the <int:id> in the route above
+    med = Medication.query.get_or_404(id) 
+    
     if med.user_id != session['user_id']:
         abort(403)
         
@@ -234,17 +238,19 @@ def edit_medication(id):
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
         med.time1 = request.form.get('time1')
-        med.time2 = request.form.get('time2') or None
+        # Ensure empty strings are converted to None for the database
+        med.time2 = request.form.get('time2') or None 
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
         med.email_enabled = 'email_enabled' in request.form
+        
         db.session.commit()
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
+    # Crucial: Passes the 'med' object to edit_medicine.html
     return render_template('edit_medicine.html', med=med)
 
-# FIX: Delete route set to POST to prevent 405 errors from dashboard forms
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
 def delete_medication(id):
@@ -256,7 +262,6 @@ def delete_medication(id):
     flash("Medication deleted.", "success")
     return redirect(url_for('dashboard'))
 
-# FIX: Route and Function name unified to 'profile' to prevent 404 errors
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
