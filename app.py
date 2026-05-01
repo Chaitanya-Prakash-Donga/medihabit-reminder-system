@@ -1,7 +1,3 @@
-"""
-MediHabit - app.py
-Full Flask backend: Auth, CRUD, Resend API Integration, & Profile Management
-"""
 import os
 import threading
 import resend
@@ -9,20 +5,21 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash, send_from_directory, jsonify, abort)
+                   redirect, url_for, session, flash, jsonify, abort)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECURITY_KEY', os.environ.get('SECRET_KEY', 'medihabit-super-secret-123'))
+app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
 
 # Initialize Resend API Key
 resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def get_now_naive():
-    return datetime.now().replace(tzinfo=None)
+    # Remove microseconds for cleaner database comparison
+    return datetime.now().replace(tzinfo=None, microsecond=0)
 
 uri = os.environ.get('DATABASE_URL')
 if uri and uri.startswith("postgres://"):
@@ -36,7 +33,6 @@ db = SQLAlchemy(app)
 
 # ── Resend Email Function ─────────────────────────────────────────────────────
 def send_mail_via_resend(to_email, subject, body):
-    """Sends email via Resend SDK using the onboarding domain."""
     try:
         params = {
             "from": "MediHabit <onboarding@resend.dev>",
@@ -45,7 +41,7 @@ def send_mail_via_resend(to_email, subject, body):
             "text": body,
         }
         resend.Emails.send(params)
-        print(f"✅ Email sent to {to_email} via Resend")
+        print(f"✅ Email sent to {to_email}")
         return True
     except Exception as e:
         print(f"❌ Resend Error: {e}")
@@ -134,6 +130,7 @@ def check_and_send():
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
+                # Check for existing log in the current minute to prevent duplicates
                 recent_log = AlertLog.query.filter(
                     AlertLog.user_id == m.user_id,
                     AlertLog.medication_name == m.name,
@@ -224,11 +221,9 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# ── UPDATED EDIT ROUTE ────────────────────────────────────────────────────────
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
-    # This 'id' matches the <int:id> in the route above
     med = Medication.query.get_or_404(id) 
     
     if med.user_id != session['user_id']:
@@ -238,7 +233,6 @@ def edit_medication(id):
         med.name = request.form.get('name')
         med.dose = request.form.get('dose')
         med.time1 = request.form.get('time1')
-        # Ensure empty strings are converted to None for the database
         med.time2 = request.form.get('time2') or None 
         med.recipient_email = request.form.get('recipient_email')
         med.notes = request.form.get('notes')
@@ -248,7 +242,6 @@ def edit_medication(id):
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
-    # Crucial: Passes the 'med' object to edit_medicine.html
     return render_template('edit_medicine.html', med=med)
 
 @app.route('/medication/delete/<int:id>', methods=['POST'])
@@ -273,7 +266,7 @@ def profile():
             user.set_password(new_pw)
         db.session.commit()
         session['user_name'] = user.name
-        flash("Profile updated successfully!", "success")
+        flash("Profile updated!", "success")
         return redirect(url_for('dashboard'))
     return render_template('edit_profile.html', user=user)
 
@@ -283,12 +276,25 @@ def trigger_reminder(med_id):
     med = Medication.query.get(med_id)
     if not med: return jsonify({"status": "not_found"}), 404
     
+    # --- DUPLICATE PREVENTION LOCK ---
+    # Check if a log was created for this medication in the last 60 seconds
+    now = get_now_naive()
+    recent_log = AlertLog.query.filter(
+        AlertLog.user_id == session['user_id'],
+        AlertLog.medication_name == med.name,
+        AlertLog.sent_at >= now - timedelta(seconds=59)
+    ).first()
+
+    if recent_log:
+        return jsonify({"status": "already_sent_this_minute"}), 200
+
     new_log = AlertLog(
         user_id=session['user_id'], medication_name=med.name,
-        status='pending', recipient=med.recipient_email, sent_at=get_now_naive()
+        status='pending', recipient=med.recipient_email, sent_at=now
     )
     db.session.add(new_log)
     db.session.commit()
+    
     threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
     return jsonify({"status": "received"}), 200
 
