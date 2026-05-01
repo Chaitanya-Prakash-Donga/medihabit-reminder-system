@@ -135,7 +135,6 @@ def check_and_send():
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                # Check if a log entry was already created for this med in the last 60 seconds
                 recent_log = AlertLog.query.filter(
                     AlertLog.user_id == m.user_id,
                     AlertLog.medication_name == m.name,
@@ -233,7 +232,7 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# FIX FOR IMAGE_660E61.PNG: Matching 'id' and 'edit_medicine.html'
+# 1. FIX: Route variable name 'id' now matches the template call
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
@@ -255,7 +254,7 @@ def edit_medication(id):
 
     return render_template('edit_medicine.html', med=med)
 
-# FIX FOR IMAGE_660D84.PNG: Method Not Allowed
+# 2. FIX: Delete route set to POST for security; ensure dashboard uses <form>
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
 def delete_medication(id):
@@ -267,7 +266,7 @@ def delete_medication(id):
     flash("Medication deleted.", "success")
     return redirect(url_for('dashboard'))
 
-# FIX FOR IMAGE_660AD7.PNG: Named 'profile' to match url_for('profile')
+# 3. FIX: Renamed function to 'profile' to match url_for('profile') in templates
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
