@@ -130,11 +130,21 @@ def send_reminder_task(med_id, log_id=None):
 
 def check_and_send():
     with app.app_context():
-        now_str = get_now_naive().strftime('%H:%M')
+        now = get_now_naive()
+        now_str = now.strftime('%H:%M')
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
-                threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
+                # FIX: Check if a log entry was already created for this med in the last 60 seconds
+                # to prevent duplicate emails from the 1-minute interval scheduler.
+                recent_log = AlertLog.query.filter(
+                    AlertLog.user_id == m.user_id,
+                    AlertLog.medication_name == m.name,
+                    AlertLog.sent_at >= now - timedelta(seconds=59)
+                ).first()
+                
+                if not recent_log:
+                    threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
@@ -222,7 +232,6 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# ── NEW: EDIT MEDICATION ──
 @app.route('/medication/edit/<int:med_id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(med_id):
@@ -243,7 +252,6 @@ def edit_medication(med_id):
 
     return render_template('edit_medication.html', med=med)
 
-# ── NEW: DELETE MEDICATION ──
 @app.route('/medication/delete/<int:med_id>', methods=['POST'])
 @login_required
 def delete_medication(med_id):
@@ -255,7 +263,6 @@ def delete_medication(med_id):
     flash("Medication deleted.", "success")
     return redirect(url_for('dashboard'))
 
-# ── NEW: PROFILE EDIT ──
 @app.route('/profile/edit', methods=['GET', 'POST'])
 @login_required
 def edit_profile():
@@ -291,10 +298,12 @@ def trigger_reminder(med_id):
 with app.app_context():
     db.create_all()
 
+# Scheduler logic with a check to prevent multiple starts
 scheduler = BackgroundScheduler()
 if not scheduler.running:
     scheduler.add_job(check_and_send, 'interval', minutes=1, id='med_job', replace_existing=True)
     scheduler.start()
 
 if __name__ == '__main__':
+    # FIX: Changed use_reloader to False to prevent the scheduler from running twice in dev
     app.run(debug=True, use_reloader=False)
