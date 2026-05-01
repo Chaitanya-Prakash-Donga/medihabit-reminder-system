@@ -12,7 +12,6 @@
         .navbar { background: white; border-bottom: 1px solid #eee; padding: 15px 0; }
         .nav-user { display: flex; align-items: center; gap: 10px; }
         
-        /* Profile Link Styling */
         .profile-clickable { 
             display: flex; 
             align-items: center; 
@@ -40,7 +39,7 @@
         .sent-badge { background: #e3f2fd; color: #1976d2; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
         
         .btn-add { background: #111; color: white; border-radius: 8px; padding: 8px 20px; font-weight: 500; }
-        .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; }
+        .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; display: inline-block; }
         .btn-remove-custom { border: 1px solid #ffcdd2; color: #d32f2f; background: none; transition: 0.2s; }
         .btn-remove-custom:hover { background: #fff5f5; }
     </style>
@@ -54,7 +53,6 @@
             <span class="fw-bold fs-5">MediHabit</span>
         </div>
         <div class="nav-user">
-            <!-- FIX: Changed from /edit_profile to /profile to match app.py route -->
             <a href="/profile" class="profile-clickable">
                 <div class="avatar-circle">{{ session['user_name'][0]|upper }}</div>
                 <span class="small text-muted">{{ session['user_name'] }}</span>
@@ -121,7 +119,7 @@
         <div class="d-flex gap-2 align-items-center">
             <a href="/medication/edit/{{ med.id }}" class="btn-outline">Edit</a>
             
-            <!-- FIX: Wrapped Remove button in a POST form to avoid 405 Method Not Allowed -->
+            <!-- FIXED: Using POST method to prevent 405 Error -->
             <form action="{{ url_for('delete_medication', id=med.id) }}" method="POST" style="display:inline;">
                 <button type="submit" class="btn-outline btn-remove-custom" onclick="return confirm('Are you sure you want to delete this medication?')">
                     Remove
@@ -151,6 +149,7 @@
     </div>
 </div>
 
+<!-- Modal for Adding Medication -->
 <div class="modal fade" id="addMedModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <form action="/medication/add" method="POST" class="modal-content border-0" style="border-radius: 15px;">
@@ -215,6 +214,7 @@
 
     setInterval(checkLocalTime, 1000);
 
+    // Initial interaction to unlock SpeechSynthesis on mobile/Chrome
     document.addEventListener('click', () => {
         const silent = new SpeechSynthesisUtterance("");
         window.speechSynthesis.speak(silent);
