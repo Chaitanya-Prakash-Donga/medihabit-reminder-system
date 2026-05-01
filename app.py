@@ -34,9 +34,8 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend Email Function (Works on Render Free Tier) ────────────────────────
+# ── Resend Email Function ─────────────────────────────────────────────────────
 def send_mail_via_resend(to_email, subject, body):
-    """Sends email via Resend SDK using the onboarding domain."""
     try:
         params = {
             "from": "MediHabit <onboarding@resend.dev>",
@@ -45,7 +44,6 @@ def send_mail_via_resend(to_email, subject, body):
             "text": body,
         }
         resend.Emails.send(params)
-        print(f"✅ Email sent to {to_email} via Resend")
         return True
     except Exception as e:
         print(f"❌ Resend Error: {e}")
@@ -71,7 +69,6 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
-    frequency = db.Column(db.String(50))
     time1 = db.Column(db.String(5))
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120))
@@ -108,7 +105,7 @@ def send_reminder_task(med_id, log_id=None):
                 f"Medication: {med.name}\n"
                 f"Dosage: {med.dose}\n"
                 f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                f"Sent via MediHabit Reminder System.")
+                f"Sent via MediHabit.")
 
         success = send_mail_via_resend(med.recipient_email, subject, body)
 
@@ -163,13 +160,6 @@ def register():
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
-
-            threading.Thread(target=send_mail_via_resend, args=(
-                email,
-                "Welcome to MediHabit!",
-                f"Hello {name},\n\nThank you for joining MediHabit. Your account is ready!"
-            )).start()
-
             flash("Account created! Please login.", "success")
             return redirect(url_for('login'))
         except Exception as e:
@@ -232,7 +222,7 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
-# 1. FIX: Route variable name 'id' now matches the template call
+# FIX: Variable 'id' now matches dashboard.html precisely
 @app.route('/medication/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_medication(id):
@@ -254,7 +244,7 @@ def edit_medication(id):
 
     return render_template('edit_medicine.html', med=med)
 
-# 2. FIX: Delete route set to POST for security; ensure dashboard uses <form>
+# FIX: Delete route set to POST to prevent 405 errors from dashboard forms
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
 def delete_medication(id):
@@ -266,7 +256,7 @@ def delete_medication(id):
     flash("Medication deleted.", "success")
     return redirect(url_for('dashboard'))
 
-# 3. FIX: Renamed function to 'profile' to match url_for('profile') in templates
+# FIX: Route and Function name unified to 'profile' to prevent 404 errors
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
