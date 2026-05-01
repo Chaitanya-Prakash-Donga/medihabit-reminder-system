@@ -1,7 +1,6 @@
 """
 MediHabit - app.py
-Full Flask backend: auth, CRUD, Resend API Integration
-Trigger-based reminders for universal timezone support.
+Full Flask backend: Auth, CRUD, Resend API Integration, & Profile Management
 """
 import os
 import threading
@@ -10,7 +9,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash, send_from_directory, jsonify)
+                   redirect, url_for, session, flash, send_from_directory, jsonify, abort)
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -37,10 +36,7 @@ db = SQLAlchemy(app)
 
 # ── Resend Email Function (Works on Render Free Tier) ────────────────────────
 def send_mail_via_resend(to_email, subject, body):
-    """
-    Sends email via Resend SDK. 
-    Note: If you haven't verified a domain, you MUST use 'onboarding@resend.dev' as the sender.
-    """
+    """Sends email via Resend SDK using the onboarding domain."""
     try:
         params = {
             "from": "MediHabit <onboarding@resend.dev>",
@@ -54,7 +50,6 @@ def send_mail_via_resend(to_email, subject, body):
     except Exception as e:
         print(f"❌ Resend Error: {e}")
         return False
-
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
@@ -92,7 +87,6 @@ class AlertLog(db.Model):
     sent_at = db.Column(db.DateTime, nullable=False)
     status = db.Column(db.String(20))
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
@@ -102,10 +96,8 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-
 # ── Automated Reminder Engine ─────────────────────────────────────────────────
 def send_reminder_task(med_id, log_id=None):
-    """Handles the actual email sending via Resend and database logging."""
     with app.app_context():
         med = Medication.query.get(med_id)
         if not med or not med.active:
@@ -118,7 +110,6 @@ def send_reminder_task(med_id, log_id=None):
                 f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
                 f"Sent via MediHabit Reminder System.")
 
-        # Updated to use Resend
         success = send_mail_via_resend(med.recipient_email, subject, body)
 
         if log_id:
@@ -137,16 +128,13 @@ def send_reminder_task(med_id, log_id=None):
             db.session.add(new_log)
             db.session.commit()
 
-
 def check_and_send():
-    """Background job that runs every minute to check scheduled times."""
     with app.app_context():
         now_str = get_now_naive().strftime('%H:%M')
         meds = Medication.query.filter_by(active=True, email_enabled=True).all()
         for m in meds:
             if m.time1 == now_str or m.time2 == now_str:
                 threading.Thread(target=send_reminder_task, args=(m.id,), daemon=True).start()
-
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
@@ -168,7 +156,6 @@ def register():
             db.session.add(user)
             db.session.commit()
 
-            # Updated to use Resend for Welcome Email
             threading.Thread(target=send_mail_via_resend, args=(
                 email,
                 "Welcome to MediHabit!",
@@ -235,46 +222,70 @@ def add_medication():
     flash(f'"{m.name}" scheduled!', 'success')
     return redirect(url_for('dashboard'))
 
+# ── NEW: EDIT MEDICATION ──
+@app.route('/medication/edit/<int:med_id>', methods=['GET', 'POST'])
+@login_required
+def edit_medication(med_id):
+    med = Medication.query.get_or_404(med_id)
+    if med.user_id != session['user_id']:
+        abort(403)
+        
+    if request.method == 'POST':
+        med.name = request.form.get('name')
+        med.dose = request.form.get('dose')
+        med.time1 = request.form.get('time1')
+        med.time2 = request.form.get('time2') or None
+        med.recipient_email = request.form.get('recipient_email')
+        med.notes = request.form.get('notes')
+        db.session.commit()
+        flash(f'"{med.name}" updated!', 'success')
+        return redirect(url_for('dashboard'))
+
+    return render_template('edit_medication.html', med=med)
+
+# ── NEW: DELETE MEDICATION ──
+@app.route('/medication/delete/<int:med_id>', methods=['POST'])
+@login_required
+def delete_medication(med_id):
+    med = Medication.query.get_or_404(med_id)
+    if med.user_id != session['user_id']:
+        abort(403)
+    db.session.delete(med)
+    db.session.commit()
+    flash("Medication deleted.", "success")
+    return redirect(url_for('dashboard'))
+
+# ── NEW: PROFILE EDIT ──
+@app.route('/profile/edit', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    user = User.query.get_or_404(session['user_id'])
+    if request.method == 'POST':
+        user.name = request.form.get('name')
+        user.email = request.form.get('email').strip().lower()
+        new_pw = request.form.get('password')
+        if new_pw:
+            user.set_password(new_pw)
+        db.session.commit()
+        session['user_name'] = user.name
+        flash("Profile updated!", "success")
+        return redirect(url_for('dashboard'))
+    return render_template('edit_profile.html', user=user)
+
 @app.route('/trigger-reminder/<int:med_id>', methods=['POST'])
 @login_required
 def trigger_reminder(med_id):
     med = Medication.query.get(med_id)
-    if not med:
-        return jsonify({"status": "not_found"}), 404
-
-    already_sent = AlertLog.query.filter(
-        AlertLog.user_id == session['user_id'],
-        AlertLog.medication_name == med.name,
-        AlertLog.sent_at >= datetime.now() - timedelta(minutes=2)
-    ).first()
-
-    if not already_sent:
-        new_log = AlertLog(
-            user_id=session['user_id'],
-            medication_name=med.name,
-            status='pending',
-            recipient=med.recipient_email,
-            sent_at=get_now_naive()
-        )
-        db.session.add(new_log)
-        db.session.commit()
-
-        # Updated to use Resend
-        threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
-        return jsonify({"status": "received"}), 200
-
-    return jsonify({"status": "duplicate_prevented"}), 200
-
-
-# ── PWA & Service Worker ──────────────────────────────────────────────────────
-@app.route('/manifest.json')
-def serve_manifest():
-    return send_from_directory('static', 'manifest.json')
-
-@app.route('/sw.js')
-def serve_sw():
-    return send_from_directory('static', 'sw.js')
-
+    if not med: return jsonify({"status": "not_found"}), 404
+    
+    new_log = AlertLog(
+        user_id=session['user_id'], medication_name=med.name,
+        status='pending', recipient=med.recipient_email, sent_at=get_now_naive()
+    )
+    db.session.add(new_log)
+    db.session.commit()
+    threading.Thread(target=send_reminder_task, args=(med.id, new_log.id), daemon=True).start()
+    return jsonify({"status": "received"}), 200
 
 # ── Startup & Scheduler ───────────────────────────────────────────────────────
 with app.app_context():
@@ -282,8 +293,7 @@ with app.app_context():
 
 scheduler = BackgroundScheduler()
 if not scheduler.running:
-    scheduler.add_job(check_and_send, 'interval', minutes=1,
-                      id='med_reminder_job', replace_existing=True)
+    scheduler.add_job(check_and_send, 'interval', minutes=1, id='med_job', replace_existing=True)
     scheduler.start()
 
 if __name__ == '__main__':
