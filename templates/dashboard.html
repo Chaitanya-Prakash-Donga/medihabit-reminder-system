@@ -117,9 +117,9 @@
             </div>
         </div>
         <div class="d-flex gap-2 align-items-center">
+            <!-- Ensure your app.py has a route for @app.route('/medication/edit/<int:id>') -->
             <a href="/medication/edit/{{ med.id }}" class="btn-outline">Edit</a>
             
-            <!-- FIXED: Using POST method to prevent 405 Error -->
             <form action="{{ url_for('delete_medication', id=med.id) }}" method="POST" style="display:inline;">
                 <button type="submit" class="btn-outline btn-remove-custom" onclick="return confirm('Are you sure you want to delete this medication?')">
                     Remove
@@ -186,7 +186,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     const meds_js = {{ meds_js | tojson }};
-    let sentThisMinute = new Set();
+    let sentThisMinute = new Set(); // Stores med IDs already sent in the current minute
 
     document.getElementById('local-tz').innerText = `(${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
 
@@ -195,23 +195,42 @@
         const currentTime = now.getHours().toString().padStart(2, '0') + ":" + 
                             now.getMinutes().toString().padStart(2, '0');
 
+        // IMPORTANT: Reset the "sent" list when a new minute starts (at 00 seconds)
+        // This prevents the code from triggering every second during the target minute
         if (now.getSeconds() === 0) {
             sentThisMinute.clear();
         }
 
         meds_js.forEach(med => {
-            if ((med.t1 === currentTime || (med.t2 && med.t2 === currentTime)) && !sentThisMinute.has(med.id)) {
+            // Check if current time matches scheduled times AND hasn't been sent yet this minute
+            const isScheduledTime = (med.t1 === currentTime || (med.t2 && med.t2 === currentTime));
+            
+            if (isScheduledTime && !sentThisMinute.has(med.id)) {
                 console.log(`Alert triggered for ${med.name} at ${currentTime} local time.`);
+                
+                // Audio Cue
                 try {
                     const speech = new SpeechSynthesisUtterance(`Reminder: Time to take ${med.name}`);
                     window.speechSynthesis.speak(speech);
-                } catch (e) {}
-                fetch(`/trigger-reminder/${med.id}`, { method: 'POST' });
+                } catch (e) {
+                    console.error("Speech error:", e);
+                }
+
+                // Send POST request to backend to trigger email
+                fetch(`/trigger-reminder/${med.id}`, { method: 'POST' })
+                    .then(response => {
+                        if(response.ok) {
+                            console.log("Reminder logged on server.");
+                        }
+                    });
+
+                // Add to the set so it doesn't fire again until the next scheduled minute
                 sentThisMinute.add(med.id);
             }
         });
     }
 
+    // Check every second
     setInterval(checkLocalTime, 1000);
 
     // Initial interaction to unlock SpeechSynthesis on mobile/Chrome
