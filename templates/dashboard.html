@@ -42,6 +42,10 @@
         .btn-outline { border: 1px solid #ddd; border-radius: 8px; padding: 5px 15px; font-size: 0.85rem; color: #1976d2; text-decoration: none; display: inline-block; }
         .btn-remove-custom { border: 1px solid #ffcdd2; color: #d32f2f; background: none; transition: 0.2s; }
         .btn-remove-custom:hover { background: #fff5f5; }
+
+        /* Custom style for the new notes field */
+        .field label { display: block; margin-bottom: 5px; }
+        .field textarea { width: 100%; padding: 10px; border-radius: 8px; border: 0; background-color: #f8f9fa; }
     </style>
 </head>
 <body>
@@ -112,12 +116,15 @@
                 <i class="fas fa-circle" style="font-size: 8px;"></i>
                 {{ med.dose }} · Scheduled
             </div>
+            <!-- Added notes display here -->
+            {% if med.notes %}
+            <div class="text-muted small mt-1"><i class="fas fa-sticky-note me-1"></i> {{ med.notes }}</div>
+            {% endif %}
             <div class="time-badge">
                 <i class="far fa-clock"></i> {{ med.time1 }}{% if med.time2 %} · {{ med.time2 }}{% endif %}
             </div>
         </div>
         <div class="d-flex gap-2 align-items-center">
-            <!-- Ensure your app.py has a route for @app.route('/medication/edit/<int:id>') -->
             <a href="/medication/edit/{{ med.id }}" class="btn-outline">Edit</a>
             
             <form action="{{ url_for('delete_medication', id=med.id) }}" method="POST" style="display:inline;">
@@ -173,9 +180,14 @@
                         <input type="time" name="time2" class="form-control bg-light border-0">
                     </div>
                 </div>
-                <div class="mb-4">
+                <div class="mb-3">
                     <label class="small fw-bold text-muted">Recipient Email</label>
                     <input type="email" name="recipient_email" class="form-control bg-light border-0" value="{{ session.get('user_email', '') }}" required>
+                </div>
+                <!-- UPDATED NOTES FIELD ADDED HERE -->
+                <div class="mb-4 field">
+                    <label class="small fw-bold text-muted">Notes (Optional)</label>
+                    <textarea name="notes" rows="3" class="form-control bg-light border-0" placeholder="e.g. Take with food, avoid grapefruit..."></textarea>
                 </div>
                 <button type="submit" class="btn btn-dark w-100 py-2">Save Medication</button>
             </div>
@@ -195,20 +207,16 @@
         const currentTime = now.getHours().toString().padStart(2, '0') + ":" + 
                             now.getMinutes().toString().padStart(2, '0');
 
-        // IMPORTANT: Reset the "sent" list when a new minute starts (at 00 seconds)
-        // This prevents the code from triggering every second during the target minute
         if (now.getSeconds() === 0) {
             sentThisMinute.clear();
         }
 
         meds_js.forEach(med => {
-            // Check if current time matches scheduled times AND hasn't been sent yet this minute
             const isScheduledTime = (med.t1 === currentTime || (med.t2 && med.t2 === currentTime));
             
             if (isScheduledTime && !sentThisMinute.has(med.id)) {
                 console.log(`Alert triggered for ${med.name} at ${currentTime} local time.`);
                 
-                // Audio Cue
                 try {
                     const speech = new SpeechSynthesisUtterance(`Reminder: Time to take ${med.name}`);
                     window.speechSynthesis.speak(speech);
@@ -216,7 +224,6 @@
                     console.error("Speech error:", e);
                 }
 
-                // Send POST request to backend to trigger email
                 fetch(`/trigger-reminder/${med.id}`, { method: 'POST' })
                     .then(response => {
                         if(response.ok) {
@@ -224,16 +231,13 @@
                         }
                     });
 
-                // Add to the set so it doesn't fire again until the next scheduled minute
                 sentThisMinute.add(med.id);
             }
         });
     }
 
-    // Check every second
     setInterval(checkLocalTime, 1000);
 
-    // Initial interaction to unlock SpeechSynthesis on mobile/Chrome
     document.addEventListener('click', () => {
         const silent = new SpeechSynthesisUtterance("");
         window.speechSynthesis.speak(silent);
