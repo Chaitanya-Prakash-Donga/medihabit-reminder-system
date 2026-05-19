@@ -77,9 +77,9 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=get_now_naive)
     
-    # New Registration and Security Fields
+    # Registration and Verification States
     mobile_number = db.Column(db.String(15), unique=True, nullable=False)
-    otp = db.Column(db.String(4), nullable=True)  # Stores temporary 4-digit sign-up OTP
+    otp = db.Column(db.String(4), nullable=True)  
     is_verified = db.Column(db.Boolean, default=False)
     
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -176,52 +176,52 @@ def index():
 def register():
     if request.method == 'POST':
         try:
-            name = request.form.get('name') or request.form.get('username')
+            username = request.form.get('username') or request.form.get('name')
             email = request.form.get('email').strip().lower()
-            pw = request.form.get('password')
+            password = request.form.get('password')
             mobile = request.form.get('mobile') or request.form.get('mobile_number')
             
+            # Check if email already exists BEFORE trying to add it
             if User.query.filter_by(email=email).first():
-                flash("Email already registered!", "danger")
+                flash("Email already registered! Please log in.", "danger")
                 return redirect(url_for('register'))
                 
-            if User.query.filter_by(mobile_number=mobile).first():
-                flash("Mobile number already registered!", "danger")
+            # Check if mobile already exists BEFORE trying to add it
+            existing_user = User.query.filter_by(mobile_number=mobile).first()
+            if existing_user:
+                flash("Mobile number already registered. Please log in.", "danger")
                 return redirect(url_for('register'))
-            
-            # 1. Generate 4-digit OTP
+                
             generated_otp = str(random.randint(1000, 9999))
             
-            # 2. Build explicit user record with security states
-            user = User(
-                name=name, 
-                email=email, 
-                mobile_number=mobile, 
-                otp=generated_otp, 
+            new_user = User(
+                name=username,
+                email=email,
+                mobile_number=mobile,
+                otp=generated_otp,
                 is_verified=False
             )
-            user.set_password(pw)
-            db.session.add(user)
-            db.session.commit()
+            new_user.set_password(password)
             
-            # 3. Store reference context variables in session state tracking
-            session['pending_mobile'] = mobile
+            db.session.add(new_user)
+            db.session.commit()  # Complete structural commit
             
-            # Debug log diagnostics
+            session['pending_mobile'] = mobile 
+            
             print(f"DEBUG DIAGNOSTIC: OTP generated for {mobile} / {email} is -> [{generated_otp}]")
             
-            # 4. Fire verification dispatch payload via background thread infrastructure
+            # Async background notification thread dispatching security code
             try:
                 threading.Thread(
                     target=send_otp_email, 
-                    args=(email, name, generated_otp), 
+                    args=(email, username, generated_otp), 
                     daemon=True
                 ).start()
             except Exception as mail_err:
                 print(f"⚠️ Non-blocking background registration email error: {mail_err}")
 
-            flash("A 4-digit verification code has been dispatched to your email address!", "info")
-            return redirect(url_for('verify_otp'))
+            flash("OTP sent to your email address!", "success")
+            return redirect(url_for('verify_otp')) 
             
         except Exception as e:
             db.session.rollback()
@@ -243,19 +243,15 @@ def verify_otp():
         
         if user and user.otp == user_otp_input:
             try:
-                # Set verification status flags
                 user.is_verified = True
-                user.otp = None  # Atomic removal of OTP token
+                user.otp = None  # Clear OTP string directly upon successful match
                 db.session.commit()
                 
-                # Fetch clean references for welcome email
                 saved_email = user.email
                 saved_name = user.name
                 
-                # Clear staging session tracking payload variables
                 session.pop('pending_mobile', None)
                 
-                # Fire async Welcome sequence pipeline safely
                 try:
                     threading.Thread(
                         target=send_welcome_email, 
@@ -265,14 +261,14 @@ def verify_otp():
                 except Exception as welcome_err:
                     print(f"⚠️ Non-blocking background welcome email error: {welcome_err}")
                 
-                flash("Account verified successfully! You can now access your account.", "success")
+                flash("Account verified successfully! You can now log in.", "success")
                 return redirect(url_for('login'))
                 
             except Exception as commit_err:
                 db.session.rollback()
                 flash(f"Database sync validation issue: {str(commit_err)}", "danger")
         else:
-            flash("Invalid security authorization OTP token matched. Please recheck your inputs.", "danger")
+            flash("Invalid OTP. Please try again.", "danger")
             
     return render_template('verify_otp.html')
 
