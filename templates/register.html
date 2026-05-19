@@ -24,6 +24,8 @@
         .flash-success{background:var(--success-bg);color:var(--success)}
         
         a{color:var(--accent);text-decoration:none;font-weight:500}
+        
+        h2.form-title{font-size:18px;font-weight:500;margin-bottom:1.25rem;text-align:center}
     </style>
 </head>
 <body>
@@ -34,6 +36,7 @@
     <p style="font-size:13px;color:var(--muted);margin-top:4px">Start managing your medication reminders</p>
   </div>
 
+  {# Flask Flash Messages #}
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -43,21 +46,40 @@
   {% endwith %}
 
   <div class="card">
-    <form action="{{ url_for('register') }}" method="POST">
-      <div class="field">
-        <label>Full name</label>
-        <input type="text" name="name" id="name" placeholder="Your name" required/>
-      </div>
-      <div class="field">
-        <label>Email address</label>
-        <input type="email" name="email" id="email" placeholder="you@email.com" required/>
-      </div>
-      <div class="field" style="margin-bottom:1.25rem">
-        <label>Password</label>
-        <input type="password" name="password" id="password" placeholder="Min. 8 characters" minlength="8" required/>
-      </div>
-      <button type="submit" class="btn">Create account</button>
-    </form>
+    
+    {% if not otp_sent %}
+      <!-- STEP 1: Registration Form -->
+      <form action="{{ url_for('register') }}" method="POST">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" name="username" id="username" placeholder="Username" required/>
+        </div>
+        <div class="field">
+          <label>Email address</label>
+          <input type="email" name="email" id="email" placeholder="you@email.com" required/>
+        </div>
+        <div class="field">
+          <label>Mobile Number</label>
+          <input type="text" name="mobile" id="mobile" placeholder="e.g., +91XXXXXXXXXX" required/>
+        </div>
+        <div class="field" style="margin-bottom:1.25rem">
+          <label>Password</label>
+          <input type="password" name="password" id="password" placeholder="Min. 8 characters" minlength="8" required/>
+        </div>
+        <button type="submit" class="btn">Sign Up</button>
+      </form>
+    {% else %}
+      <!-- STEP 2: OTP Verification Form (Shows when backend sets otp_sent = True) -->
+      <h2 class="form-title">Enter Mobile Verification Code</h2>
+      <form action="/verify-otp" method="POST">
+        <div class="field" style="margin-bottom:1.25rem">
+          <label>4-Digit OTP</label>
+          <input type="text" name="otp" id="otp" placeholder="4-Digit OTP" maxlength="4" pattern="\d{4}" required style="text-align: center; font-size: 18px; letter-spacing: 4px;"/>
+        </div>
+        <button type="submit" class="btn">Verify & Register</button>
+      </form>
+    {% endif %}
+
   </div>
 
   <p style="text-align:center;font-size:14px;color:var(--muted);margin-top:1rem">
