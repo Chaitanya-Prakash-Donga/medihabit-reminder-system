@@ -1,15 +1,14 @@
 import os
-import random
 import threading
+import resend
 from datetime import datetime, timedelta
 from functools import wraps
 
-import resend
-from apscheduler.schedulers.background import BackgroundScheduler
-from flask import (Flask, abort, flash, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (Flask, render_template, request,
+                   redirect, url_for, session, flash, jsonify, abort)
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -47,17 +46,7 @@ def send_mail_via_resend(to_email, subject, body):
         print(f"❌ Resend Error: {e}")
         return False
 
-# ── Verification & Onboarding Notification Helpers ───────────────────────────
-def send_otp_email(recipient_email, name, otp_code):
-    subject = "Verify Your MediHabit Account 🔑"
-    body = (f"Hello {name},\n\n"
-            f"Thank you for registering with the MediHabit Reminder System!\n\n"
-            f"Your 4-digit One-Time Password (OTP) verification code is: {otp_code}\n\n"
-            f"Please enter this code on the registration verification screen to activate your profile. "
-            f"This code is confidential and should not be shared.\n\n"
-            f"Best regards,\nThe MediHabit Team")
-    return send_mail_via_resend(recipient_email, subject, body)
-
+# ── Welcome Email Helper ──────────────────────────────────────────────────────
 def send_welcome_email(recipient_email, name):
     subject = "Welcome to MediHabit! 💊"
     body = (f"Hello {name},\n\n"
@@ -65,23 +54,16 @@ def send_welcome_email(recipient_email, name):
             "We are here to help you stay on track with your health and medications.\n\n"
             "Log in now to start adding your daily schedules.\n\n"
             "Best regards,\nThe MediHabit Team")
+    # Using your existing resend function
     return send_mail_via_resend(recipient_email, subject, body)
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
-    __tablename__ = 'users'
-    
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=get_now_naive)
-    
-    # Registration and Verification States
-    mobile_number = db.Column(db.String(15), unique=True, nullable=False)
-    otp = db.Column(db.String(4), nullable=True)  
-    is_verified = db.Column(db.Boolean, default=False)
-    
     medications = db.relationship('Medication', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, pw):
@@ -92,7 +74,7 @@ class User(db.Model):
 
 class Medication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
     time1 = db.Column(db.String(5))
@@ -104,7 +86,7 @@ class Medication(db.Model):
 
 class AlertLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     medication_name = db.Column(db.String(200))
     recipient = db.Column(db.String(120))
     sent_at = db.Column(db.DateTime, default=get_now_naive)
@@ -176,101 +158,33 @@ def index():
 def register():
     if request.method == 'POST':
         try:
-            username = request.form.get('username') or request.form.get('name')
+            name = request.form.get('name')
             email = request.form.get('email').strip().lower()
-            password = request.form.get('password')
-            mobile = request.form.get('mobile') or request.form.get('mobile_number')
+            pw = request.form.get('password')
             
-            # Check if email already exists BEFORE trying to add it
             if User.query.filter_by(email=email).first():
-                flash("Email already registered! Please log in.", "danger")
+                flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
-                
-            # Check if mobile already exists BEFORE trying to add it
-            existing_user = User.query.filter_by(mobile_number=mobile).first()
-            if existing_user:
-                flash("Mobile number already registered. Please log in.", "danger")
-                return redirect(url_for('register'))
-                
-            generated_otp = str(random.randint(1000, 9999))
             
-            new_user = User(
-                name=username,
-                email=email,
-                mobile_number=mobile,
-                otp=generated_otp,
-                is_verified=False
-            )
-            new_user.set_password(password)
+            # Create the user
+            user = User(name=name, email=email)
+            user.set_password(pw)
+            db.session.add(user)
+            db.session.commit()
             
-            db.session.add(new_user)
-            db.session.commit()  # Complete structural commit
-            
-            session['pending_mobile'] = mobile 
-            
-            print(f"DEBUG DIAGNOSTIC: OTP generated for {mobile} / {email} is -> [{generated_otp}]")
-            
-            # Async background notification thread dispatching security code
+            # SEND WELCOME EMAIL
             try:
-                threading.Thread(
-                    target=send_otp_email, 
-                    args=(email, username, generated_otp), 
-                    daemon=True
-                ).start()
-            except Exception as mail_err:
-                print(f"⚠️ Non-blocking background registration email error: {mail_err}")
+                # Use threading to prevent the page from hanging while email sends
+                threading.Thread(target=send_welcome_email, args=(email, name), daemon=True).start()
+            except Exception as e:
+                print(f"Welcome Mail Error: {e}")
 
-            flash("OTP sent to your email address!", "success")
-            return redirect(url_for('verify_otp')) 
-            
+            flash("Account created! Please login. A welcome email has been sent.", "success")
+            return redirect(url_for('login'))
         except Exception as e:
             db.session.rollback()
-            flash(f"Registration Interruption Error: {str(e)}", "danger")
-            return redirect(url_for('register'))
-            
+            flash(f"Error: {str(e)}", "danger")
     return render_template('register.html')
-
-@app.route('/verify-otp', methods=['GET', 'POST'])
-def verify_otp():
-    mobile = session.get('pending_mobile')
-    if not mobile:
-        flash("No active registration wizard session detected. Please sign up.", "warning")
-        return redirect(url_for('register'))
-        
-    if request.method == 'POST':
-        user_otp_input = request.form.get('otp')
-        user = User.query.filter_by(mobile_number=mobile).first()
-        
-        if user and user.otp == user_otp_input:
-            try:
-                user.is_verified = True
-                user.otp = None  # Clear OTP string directly upon successful match
-                db.session.commit()
-                
-                saved_email = user.email
-                saved_name = user.name
-                
-                session.pop('pending_mobile', None)
-                
-                try:
-                    threading.Thread(
-                        target=send_welcome_email, 
-                        args=(saved_email, saved_name), 
-                        daemon=True
-                    ).start()
-                except Exception as welcome_err:
-                    print(f"⚠️ Non-blocking background welcome email error: {welcome_err}")
-                
-                flash("Account verified successfully! You can now log in.", "success")
-                return redirect(url_for('login'))
-                
-            except Exception as commit_err:
-                db.session.rollback()
-                flash(f"Database sync validation issue: {str(commit_err)}", "danger")
-        else:
-            flash("Invalid OTP. Please try again.", "danger")
-            
-    return render_template('verify_otp.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -278,17 +192,10 @@ def login():
         email = request.form.get('email').strip().lower()
         pw = request.form.get('password')
         user = User.query.filter_by(email=email).first()
-        
         if user and user.check_password(pw):
-            if not user.is_verified:
-                session['pending_mobile'] = user.mobile_number
-                flash("Your account status is currently unverified. Please confirm validation code.", "warning")
-                return redirect(url_for('verify_otp'))
-                
             session.update({'user_id': user.id, 'user_name': user.name, 'user_email': user.email})
             return redirect(url_for('dashboard'))
-            
-        flash("Invalid structural validation credentials.", "danger")
+        flash("Invalid credentials", "danger")
     return render_template('login.html')
 
 @app.route('/logout')
@@ -355,7 +262,7 @@ def edit_medication(id):
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
-    return render_template('edit_medication.html', med=med)
+    return render_template('edit_medicine.html', med=med)
 
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
@@ -387,8 +294,7 @@ def profile():
 @login_required
 def trigger_reminder(med_id):
     med = Medication.query.get(med_id)
-    if not med: 
-        return jsonify({"status": "not_found"}), 404
+    if not med: return jsonify({"status": "not_found"}), 404
     
     now = get_now_naive()
     recent_log = AlertLog.query.filter(
@@ -401,11 +307,8 @@ def trigger_reminder(med_id):
         return jsonify({"status": "already_sent_this_minute"}), 200
 
     new_log = AlertLog(
-        user_id=session['user_id'], 
-        medication_name=med.name,
-        status='pending', 
-        recipient=med.recipient_email, 
-        sent_at=now
+        user_id=session['user_id'], medication_name=med.name,
+        status='pending', recipient=med.recipient_email, sent_at=now
     )
     db.session.add(new_log)
     db.session.commit()
