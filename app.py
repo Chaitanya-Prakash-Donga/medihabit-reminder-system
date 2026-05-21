@@ -31,14 +31,18 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 db = SQLAlchemy(app)
 
 # ── Resend Email Function ─────────────────────────────────────────────────────
-def send_mail_via_resend(to_email, subject, body):
+def send_mail_via_resend(to_email, subject, body_text, body_html=None):
     try:
         params = {
-            "from": "MediHabit <onboarding@resend.dev>",
+            # ⚠️ IMPORTANT: Replace with your actual verified domain after configuring it in Resend dashboard
+            "from": "MediHabit <reminders@yourverifieddomain.com>",
             "to": [to_email],
             "subject": subject,
-            "text": body,
+            "text": body_text,
         }
+        if body_html:
+            params["html"] = body_html
+            
         resend.Emails.send(params)
         print(f"✅ Email sent to {to_email}")
         return True
@@ -54,7 +58,6 @@ def send_welcome_email(recipient_email, name):
             "We are here to help you stay on track with your health and medications.\n\n"
             "Log in now to start adding your daily schedules.\n\n"
             "Best regards,\nThe MediHabit Team")
-    # Using your existing resend function
     return send_mail_via_resend(recipient_email, subject, body)
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -77,9 +80,9 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
-    time1 = db.Column(db.String(5))
+    time1 = db.Column(db.String(5)) # e.g., "08:00"
     time2 = db.Column(db.String(5), nullable=True)
-    recipient_email = db.Column(db.String(120))
+    recipient_email = db.Column(db.String(120), nullable=True)
     notes = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True)
     email_enabled = db.Column(db.Boolean, default=True)
@@ -108,14 +111,32 @@ def send_reminder_task(med_id, log_id=None):
         if not med or not med.active:
             return
 
-        subject = f"💊 Time for {med.name}"
-        body = (f"Hello,\n\nThis is a reminder to take your medication:\n"
-                f"Medication: {med.name}\n"
-                f"Dosage: {med.dose}\n"
-                f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                f"Sent via MediHabit Reminder System.")
+        # Fallback Strategy: Use custom target field if specified, otherwise fall back to account holder's primary email
+        target_email = med.recipient_email if med.recipient_email else med.user.email
+        user_display_name = med.user.name
 
-        success = send_mail_via_resend(med.recipient_email, subject, body)
+        subject = f"⏰ MediHabit: Time for your {med.name}!"
+        
+        body_text = (f"Hello {user_display_name},\n\n"
+                     f"This is a reminder to take your medication:\n"
+                     f"Medication: {med.name}\n"
+                     f"Dosage: {med.dose}\n"
+                     f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
+                     f"Stay healthy!\nSent via MediHabit Reminder System.")
+
+        body_html = f"""
+            <h3>Hello {user_display_name},</h3>
+            <p>This is a friendly reminder from your <b>MediHabit System</b>.</p>
+            <p>It is time to take your medication: <strong>{med.name}</strong>.</p>
+            <ul>
+                <li><strong>Dosage:</strong> {med.dose}</li>
+                <li><strong>Notes:</strong> {med.notes if med.notes else 'N/A'}</li>
+            </ul>
+            <br>
+            <p><i>Stay healthy!</i></p>
+        """
+
+        success = send_mail_via_resend(target_email, subject, body_text, body_html=body_html)
 
         if log_id:
             log = AlertLog.query.get(log_id)
@@ -127,7 +148,7 @@ def send_reminder_task(med_id, log_id=None):
                 user_id=med.user_id,
                 medication_name=med.name,
                 status='sent' if success else 'failed',
-                recipient=med.recipient_email,
+                recipient=target_email,
                 sent_at=get_now_naive()
             )
             db.session.add(new_log)
@@ -166,15 +187,12 @@ def register():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
             
-            # Create the user
             user = User(name=name, email=email)
             user.set_password(pw)
             db.session.add(user)
             db.session.commit()
             
-            # SEND WELCOME EMAIL
             try:
-                # Use threading to prevent the page from hanging while email sends
                 threading.Thread(target=send_welcome_email, args=(email, name), daemon=True).start()
             except Exception as e:
                 print(f"Welcome Mail Error: {e}")
@@ -262,7 +280,7 @@ def edit_medication(id):
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
-    return render_template('edit_medicine.html', med=med)
+    return render_template('edit_medication.html', med=med)
 
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
@@ -308,7 +326,7 @@ def trigger_reminder(med_id):
 
     new_log = AlertLog(
         user_id=session['user_id'], medication_name=med.name,
-        status='pending', recipient=med.recipient_email, sent_at=now
+        status='pending', recipient=med.recipient_email if med.recipient_email else med.user.email, sent_at=now
     )
     db.session.add(new_log)
     db.session.commit()
