@@ -5,5 +5,5 @@ APScheduler
 pytz
 gunicorn
 psycopg2-binary
-resend
+Flask-Mail
 requests
