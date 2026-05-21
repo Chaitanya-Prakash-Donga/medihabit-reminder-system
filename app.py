@@ -1,6 +1,5 @@
 import os
 import threading
-import resend
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -9,13 +8,11 @@ from flask import (Flask, render_template, request,
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask_mail import Mail, Message
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
-
-# Initialize Resend API Key
-resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def get_now_naive():
     return datetime.now().replace(tzinfo=None, microsecond=0)
@@ -30,35 +27,42 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend Email Function ─────────────────────────────────────────────────────
-def send_mail_via_resend(to_email, subject, body_text, body_html=None):
+# ── Flask-Mail Setup (Replaces Resend) ────────────────────────────────────────
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+
+# Looks for your credentials in environment variables, defaults to strings if not set
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'your_gmail_username@gmail.com')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'xxxx xxxx xxxx xxxx')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', 'your_gmail_username@gmail.com')
+
+mail = Mail(app)
+
+# ── Updated Email Function (Replaces send_mail_via_resend) ────────────────────
+def send_mail_via_gmail(to_email, subject, body_html):
     try:
-        params = {
-            # ⚠️ IMPORTANT: Replace with your actual verified domain after configuring it in Resend dashboard
-            "from": "MediHabit <reminders@yourverifieddomain.com>",
-            "to": [to_email],
-            "subject": subject,
-            "text": body_text,
-        }
-        if body_html:
-            params["html"] = body_html
-            
-        resend.Emails.send(params)
-        print(f"✅ Email sent to {to_email}")
+        msg = Message(subject=subject, recipients=[to_email])
+        msg.html = body_html  # Sends beautifully formatted HTML
+        mail.send(msg)
+        print(f"✅ Email successfully delivered to {to_email} via Gmail")
         return True
     except Exception as e:
-        print(f"❌ Resend Error: {e}")
+        print(f"❌ Gmail SMTP Error sending to {to_email}: {e}")
         return False
 
 # ── Welcome Email Helper ──────────────────────────────────────────────────────
 def send_welcome_email(recipient_email, name):
     subject = "Welcome to MediHabit! 💊"
-    body = (f"Hello {name},\n\n"
-            "Thank you for joining the MediHabit Reminder System! "
-            "We are here to help you stay on track with your health and medications.\n\n"
-            "Log in now to start adding your daily schedules.\n\n"
-            "Best regards,\nThe MediHabit Team")
-    return send_mail_via_resend(recipient_email, subject, body)
+    body_html = f"""
+        <h3>Hello {name},</h3>
+        <p>Thank you for joining the <b>MediHabit Reminder System</b>!</p>
+        <p>We are here to help you stay on track with your health and medications.</p>
+        <p>Log in now to start adding your daily schedules.</p>
+        <br>
+        <p>Best regards,<br><b>The MediHabit Team</b></p>
+    """
+    return send_mail_via_gmail(recipient_email, subject, body_html)
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
@@ -80,7 +84,7 @@ class Medication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(200), nullable=False)
     dose = db.Column(db.String(100))
-    time1 = db.Column(db.String(5)) # e.g., "08:00"
+    time1 = db.Column(db.String(5))  # e.g., "08:00"
     time2 = db.Column(db.String(5), nullable=True)
     recipient_email = db.Column(db.String(120), nullable=True)
     notes = db.Column(db.Text)
@@ -115,28 +119,22 @@ def send_reminder_task(med_id, log_id=None):
         target_email = med.recipient_email if med.recipient_email else med.user.email
         user_display_name = med.user.name
 
-        subject = f"⏰ MediHabit: Time for your {med.name}!"
+        subject = f"💊 Time for {med.name}"
         
-        body_text = (f"Hello {user_display_name},\n\n"
-                     f"This is a reminder to take your medication:\n"
-                     f"Medication: {med.name}\n"
-                     f"Dosage: {med.dose}\n"
-                     f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                     f"Stay healthy!\nSent via MediHabit Reminder System.")
-
         body_html = f"""
             <h3>Hello {user_display_name},</h3>
             <p>This is a friendly reminder from your <b>MediHabit System</b>.</p>
             <p>It is time to take your medication: <strong>{med.name}</strong>.</p>
             <ul>
-                <li><strong>Dosage:</strong> {med.dose}</li>
+                <li><strong>Dosage:</strong> {med.dose if med.dose else 'N/A'}</li>
                 <li><strong>Notes:</strong> {med.notes if med.notes else 'N/A'}</li>
             </ul>
             <br>
-            <p><i>Stay healthy!</i></p>
+            <p><i>Stay healthy!</i><br>Sent via MediHabit Reminder System.</p>
         """
 
-        success = send_mail_via_resend(target_email, subject, body_text, body_html=body_html)
+        # Triggers Gmail delivery pipeline instead of Resend
+        success = send_mail_via_gmail(target_email, subject, body_html)
 
         if log_id:
             log = AlertLog.query.get(log_id)
@@ -324,9 +322,11 @@ def trigger_reminder(med_id):
     if recent_log:
         return jsonify({"status": "already_sent_this_minute"}), 200
 
+    target_email = med.recipient_email if med.recipient_email else med.user.email
+
     new_log = AlertLog(
         user_id=session['user_id'], medication_name=med.name,
-        status='pending', recipient=med.recipient_email if med.recipient_email else med.user.email, sent_at=now
+        status='pending', recipient=target_email, sent_at=now
     )
     db.session.add(new_log)
     db.session.commit()
