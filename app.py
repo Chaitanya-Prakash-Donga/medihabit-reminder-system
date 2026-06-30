@@ -1,21 +1,21 @@
 import os
+import random
+import smtplib
 import threading
-import resend
 from datetime import datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from functools import wraps
 
-from flask import (Flask, render_template, request,
-                   redirect, url_for, session, flash, jsonify, abort)
+from flask import (Flask, abort, flash, jsonify, redirect, render_template,
+                   request, session, url_for)
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── App & DB setup ────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECURITY_KEY', 'medihabit-super-secret-123')
-
-# Initialize Resend API Key
-resend.api_key = os.environ.get('RESEND_API_KEY')
 
 def get_now_naive():
     return datetime.now().replace(tzinfo=None, microsecond=0)
@@ -30,32 +30,32 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle"
 
 db = SQLAlchemy(app)
 
-# ── Resend Email Function ─────────────────────────────────────────────────────
-def send_mail_via_resend(to_email, subject, body):
+# ── Gmail SMTP Configuration ──────────────────────────────────────────────────
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'your-gmail-username@gmail.com')  
+SENDER_PASSWORD = os.environ.get('SENDER_PASSWORD', 'your-16-digit-app-password')  
+
+# ── HTML Email Core Function ──────────────────────────────────────────────────
+def send_html_email(receiver_email, subject, html_body):
+    msg = MIMEMultipart('alternative')
+    msg['From'] = f"MediHabit <{SENDER_EMAIL}>"
+    msg['To'] = receiver_email
+    msg['Subject'] = subject
+    
+    msg.attach(MIMEText(html_body, 'html'))
+    
     try:
-        params = {
-            "from": "MediHabit <onboarding@resend.dev>",
-            "to": [to_email],
-            "subject": subject,
-            "text": body,
-        }
-        resend.Emails.send(params)
-        print(f"✅ Email sent to {to_email}")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
+        server.quit()
+        print(f"✅ HTML Email sent successfully to {receiver_email}")
         return True
     except Exception as e:
-        print(f"❌ Resend Error: {e}")
+        print(f"❌ SMTP Mail Delivery Error: {e}")
         return False
-
-# ── Welcome Email Helper ──────────────────────────────────────────────────────
-def send_welcome_email(recipient_email, name):
-    subject = "Welcome to MediHabit! 💊"
-    body = (f"Hello {name},\n\n"
-            "Thank you for joining the MediHabit Reminder System! "
-            "We are here to help you stay on track with your health and medications.\n\n"
-            "Log in now to start adding your daily schedules.\n\n"
-            "Best regards,\nThe MediHabit Team")
-    # Using your existing resend function
-    return send_mail_via_resend(recipient_email, subject, body)
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class User(db.Model):
@@ -108,14 +108,37 @@ def send_reminder_task(med_id, log_id=None):
         if not med or not med.active:
             return
 
-        subject = f"💊 Time for {med.name}"
-        body = (f"Hello,\n\nThis is a reminder to take your medication:\n"
-                f"Medication: {med.name}\n"
-                f"Dosage: {med.dose}\n"
-                f"Notes: {med.notes if med.notes else 'N/A'}\n\n"
-                f"Sent via MediHabit Reminder System.")
+        subject = f"💊 Time for your medication: {med.name}"
+        html_body = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; background-color: #f4f6f9; padding: 20px; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; background: #ffffff; padding: 30px; border-top: 4px solid #007bff; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <h2 style="color: #007bff; text-align: center; margin-top: 0;">Medication Reminder</h2>
+                    <p>Hello,</p>
+                    <p>This is an automated notification from your <strong>MediHabit System</strong> to remind you that it is time to take your dose.</p>
+                    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                        <tr style="background-color: #f8f9fa;">
+                            <td style="padding: 10px; border: 1px solid #dee2e6; font-weight: bold; width: 30%;">Medication:</td>
+                            <td style="padding: 10px; border: 1px solid #dee2e6;">{med.name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #dee2e6; font-weight: bold;">Dosage:</td>
+                            <td style="padding: 10px; border: 1px solid #dee2e6;">{med.dose if med.dose else 'N/A'}</td>
+                        </tr>
+                        <tr style="background-color: #f8f9fa;">
+                            <td style="padding: 10px; border: 1px solid #dee2e6; font-weight: bold;">Notes:</td>
+                            <td style="padding: 10px; border: 1px solid #dee2e6;">{med.notes if med.notes else 'None'}</td>
+                        </tr>
+                    </table>
+                    <p style="font-size: 13px; color: #6c757d; text-align: center; margin-top: 30px;">
+                        Stay healthy!<br>Generated by MediHabit Tracker.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
 
-        success = send_mail_via_resend(med.recipient_email, subject, body)
+        success = send_html_email(med.recipient_email, subject, html_body)
 
         if log_id:
             log = AlertLog.query.get(log_id)
@@ -166,25 +189,82 @@ def register():
                 flash("Email already registered!", "danger")
                 return redirect(url_for('register'))
             
-            # Create the user
-            user = User(name=name, email=email)
-            user.set_password(pw)
-            db.session.add(user)
-            db.session.commit()
+            # Generate 4-digit verification code
+            otp = str(random.randint(1000, 9999))
             
-            # SEND WELCOME EMAIL
-            try:
-                # Use threading to prevent the page from hanging while email sends
-                threading.Thread(target=send_welcome_email, args=(email, name), daemon=True).start()
-            except Exception as e:
-                print(f"Welcome Mail Error: {e}")
+            # Put registration data onto temporary user session
+            session['pending_user'] = {
+                'name': name,
+                'email': email,
+                'password': pw
+            }
+            session['otp'] = otp
+            
+            # Create Custom HTML Email Body
+            html_content = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
+                    <div style="max-width: 500px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h2 style="color: #28a745; text-align: center;">MediHabit Verification</h2>
+                        <p>Hello {name},</p>
+                        <p>Thank you for signing up for MediHabit. Please enter the following 4-digit verification code to fully activate your profile:</p>
+                        <div style="font-size: 32px; font-weight: bold; text-align: center; letter-spacing: 8px; margin: 24px 0; padding: 15px; background: #f8f9fa; border: 1px dashed #28a745; color: #28a745; border-radius: 4px;">
+                            {otp}
+                        </div>
+                        <p style="font-size: 12px; color: #6c757d; text-align: center; margin-top: 30px;">
+                            If you did not execute this profile request, you can safely ignore this notification.
+                        </p>
+                    </div>
+                </body>
+            </html>
+            """
+            
+            # Execute mailing using threaded background task
+            subject = "MediHabit - Verify Your Account 💊"
+            threading.Thread(target=send_html_email, args=(email, subject, html_content), daemon=True).start()
 
-            flash("Account created! Please login. A welcome email has been sent.", "success")
-            return redirect(url_for('login'))
+            flash("A 4-digit OTP has been dispatched to your email address.", "info")
+            return redirect(url_for('verify_otp'))
+            
         except Exception as e:
-            db.session.rollback()
-            flash(f"Error: {str(e)}", "danger")
+            flash(f"Registration Error: {str(e)}", "danger")
+            
     return render_template('register.html')
+
+@app.route('/verify-otp', methods=['GET', 'POST'])
+def verify_otp():
+    if 'pending_user' not in session or 'otp' not in session:
+        flash("No valid registration process found.", "warning")
+        return redirect(url_for('register'))
+        
+    if request.method == 'POST':
+        user_otp = request.form.get('otp')
+        
+        if user_otp == session['otp']:
+            try:
+                user_data = session['pending_user']
+                
+                # Instantiating user data inside database
+                user = User(name=user_data['name'], email=user_data['email'])
+                user.set_password(user_data['password'])
+                
+                db.session.add(user)
+                db.session.commit()
+                
+                # Clear out registration session data caches
+                session.pop('pending_user', None)
+                session.pop('otp', None)
+                
+                flash("Account verified successfully! You can now log in.", "success")
+                return redirect(url_for('login'))
+                
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Database error writing user context: {str(e)}", "danger")
+        else:
+            flash("Invalid OTP match. Please try again.", "danger")
+            
+    return render_template('verify_otp.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -262,7 +342,7 @@ def edit_medication(id):
         flash(f'"{med.name}" updated!', 'success')
         return redirect(url_for('dashboard'))
 
-    return render_template('edit_medicine.html', med=med)
+    return render_template('edit_medication.html', med=med)
 
 @app.route('/medication/delete/<int:id>', methods=['POST'])
 @login_required
